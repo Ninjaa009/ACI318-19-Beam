@@ -55,7 +55,20 @@ description: ออกแบบและตรวจสอบเสา คสล
 
 ความเสี่ยงหลักมี 2 เรื่อง: **เครื่องหมาย P (อัด/ดึง)** และ **การจับคู่แกน** — เรื่องอื่นปิดไว้แล้ว (ทิศการดัดตัดสินจาก |V|·L ซึ่งใช้แต่ขนาด, หน้าตัดเหล็กสมมาตรจึงไม่ขึ้นกับเครื่องหมาย Mx/My)
 
-- `from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, beta90, flip_axial)`: แปลง Member End Forces (แกน local, ค่าที่ start/end) → **P = Fx(start)** (บวก = อัด), **Mz → Mx** (ความลึก YD = h), **Fy → Vuy**, **My → My** (ZD = b), **Fz → Vux**; beta 90° สลับคู่แกน; ⚠️ ยืนยันกับโมเดลจริงเสมอ (beta angle, start node อยู่ล่างหรือบน)
+- **ชื่อแกนตาม STAAD (ใช้ในแอปและ Calsheet):**
+
+  | STAAD | ภายใน solver | ความหมาย |
+  |---|---|---|
+  | YD | h | ความลึกตามแกน local y |
+  | ZD | b | ความกว้างตามแกน local z |
+  | Mz (ดัดรอบ z) | Mx | ใช้ความลึก YD, คู่กับ Fy |
+  | My (ดัดรอบ y) | My | ใช้ความลึก ZD, คู่กับ Fz |
+  | Fy / Fz | Vuy / Vux | แรงเฉือน |
+  | Fx (start) | Pu | บวก = อัด |
+
+  `STAAD_AXIS = {"x": "z", "y": "y"}` ใช้แปลงชื่อแกนภายใน → ชื่อ STAAD
+- `from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, flip_axial)`: แปลง Member End Forces (แกน local) ตามตารางข้างบน — **ไม่ขึ้นกับ beta** เพราะแรงและ YD/ZD อยู่ในแกน local เดียวกัน
+- `staad_sway_dir(global_dir, beta90)`: beta มีผลเฉพาะการจับคู่ทิศ Q ของชั้น (แกนโลก) กับแกน local — beta 0: เซทิศโลก X → Mz (ภายใน "y"), ทิศ Z → My (ภายใน "x"); beta 90 สลับกัน ⚠️ ยืนยันกับโมเดลจริงเสมอ (beta angle, start node อยู่ล่างหรือบน)
 - `check_axial_sign(rows)`: **combo แนวดิ่งล้วน (D, L) ต้องได้ P > 0** ไม่เช่นนั้นหยุด (เครื่องหมาย P น่าจะกลับ เช่น อ่าน Fx ที่ end node) — ให้ผู้ใช้ระบุอย่างน้อย 1 combo แนวดิ่ง
 - `curvature_ratio` ต้องได้ |V|·L ตรงกับ |Mt|+|Mb| หรือ ||Mt|−|Mb|| ภายใน 10% (`CURV_TOL`) ไม่เช่นนั้น **แจ้งให้ระบุ single/double เอง** — ใช้จับการจับคู่ V↔M ผิดแกน หรือมีแรงกระทำระหว่างช่วง
 - เสาไม่จัตุรัส (b ≠ h): ต้องยืนยันว่า h = YD และ b = ZD ก่อนคำนวณ (สลับด้านแล้วความจุผิด)
@@ -133,7 +146,7 @@ description: ออกแบบและตรวจสอบเสา คสล
 
 ## 10. การตรวจสอบความถูกต้อง
 
-`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 93/93** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C9 จำแนก sway/non-sway ตาราง Q ของ RCDC 6 แถว, C10 ด่านบังคับ non-sway, C11 sign convention/STAAD)
+`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 95/95** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C9 จำแนก sway/non-sway ตาราง Q ของ RCDC 6 แถว, C10 ด่านบังคับ non-sway, C11 sign convention/STAAD)
 
 - ตรงกับ RCDC: φPn,max 1,232.14 kN; φMcap แกนเดียว 54.22 vs 54.16 kN·m; φVc 50.79/52.28 kN; φVs 107.37 kN; Q 0.011
 - **ยังไม่ทราบสาเหตุ:** φMcap สองแกน (มุม 33.1°) solver 54.26 vs RCDC 53.66 kN·m (RCDC ต่ำกว่า 1.1%)

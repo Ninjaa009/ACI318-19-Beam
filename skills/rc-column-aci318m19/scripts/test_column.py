@@ -267,9 +267,11 @@ def run():
     check_true("C11", "STAAD: Mz→Mx, Fy→Vuy, My→My, Fz→Vux, P = Fx(start)",
                (f["Pu"], f["Mxt"], f["Mxb"], f["Vuy"], f["Myt"], f["Myb"], f["Vux"])
                == (1600, 90, 60, 6, 30, 20, 10))
-    f90 = C.from_staad(1600, -6, 10, -20, 60, -30, -90, beta90=True)
-    check_true("C11", "beta 90° สลับคู่แกน", (f90["Mxt"], f90["Vuy"], f90["Myt"], f90["Vux"])
-               == (30, 10, 90, 6))
+    check_true("C11", "ทิศการเซ (beta 0): X → Mz (ภายใน y), Z → My (ภายใน x)",
+               (C.staad_sway_dir("X"), C.staad_sway_dir("z")) == ("y", "x"))
+    check_true("C11", "beta 90°: สลับการจับคู่ทิศการเซ (แรงไม่สลับ)",
+               (C.staad_sway_dir("X", True), C.staad_sway_dir("Z", True)) == ("x", "y"))
+    check_true("C11", "ชื่อแกน STAAD: x ภายใน = z, y = y", C.STAAD_AXIS == {"x": "z", "y": "y"})
     check_true("C11", "flip_axial กลับเครื่องหมาย P", C.from_staad(1600, 0, 0, 0, 0, 0, 0,
                                                                      flip_axial=True)["Pu"] == -1600)
     ok, m = C.check_axial_sign([("1.2D+1.6L", -1500e3, True), ("W", 300e3, False)])

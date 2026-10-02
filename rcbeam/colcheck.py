@@ -44,6 +44,7 @@ class ColumnInput:
     stories: list = None         # แถวข้อมูลชั้นสำหรับ classify_stories (ทุกชั้น ทุกทิศ ทุก combo)
     story_name: str = ""         # ชั้นที่เสาต้นนี้อยู่
     sway_bypass: str = ""        # เหตุผลที่วิศวกรยืนยัน non-sway เอง (ว่าง = ไม่ข้าม)
+    dir_labels: dict = None      # ชื่อทิศการเซที่แสดงผล เช่น {"y": "X", "x": "Z"} (แกนโลก STAAD)
     omf: bool = False            # §18.3.3 (OMF ใน SDC B)
     cover_min: float = 40.0
 
@@ -139,7 +140,7 @@ def run(inp, combos):
     out["sway"] = any(c.status == "sway" for c in mine)
     # ด่านบังคับ: ต้องเป็น non-sway ครบทั้งสองทิศก่อนออกแบบ (sway ปิดปรับปรุง)
     out["gate_ok"], out["gate_msgs"] = C.nonsway_gate(out["classes"], inp.story_name,
-                                                      inp.sway_bypass)
+                                                      inp.sway_bypass, inp.dir_labels)
     out["bypass"] = out["gate_ok"] and bool(out["gate_msgs"])
     out["results"] = [check_combo(inp, sec, cb) for cb in combos] if out["gate_ok"] else []
     good = [r for r in out["results"] if not r.error]
@@ -157,6 +158,9 @@ def _st(ok):
     return PASS if ok else FAIL
 
 
+SHEAR_NAME = {"y": "Fy (คู่กับ Mz)", "x": "Fz (คู่กับ My)"}     # ชื่อแบบ STAAD
+
+
 def summary(out):
     rows = []
     if out["Q"]:
@@ -165,7 +169,8 @@ def summary(out):
             val = ("ไม่มี combo ที่มีแรงด้านข้าง" if math.isnan(c.Q_max) else
                    f"Q max = {c.Q_max:.4f} (combo {c.combo})" +
                    (f", Q/0.35 = {c.Q_upper:.4f}" if c.Q_upper is not None else ""))
-            rows.append((f"Sway ชั้น {c.story} ทิศ {c.direction.upper()}", val, st, "6.6.4.3"))
+            lab = (out["inp"].dir_labels or {}).get(c.direction, c.direction.upper())
+            rows.append((f"Sway ชั้น {c.story} ทิศ {lab}", val, st, "6.6.4.3"))
     for m in out.get("gate_msgs", []):
         rows.append(("ด่านตรวจ sway ก่อนออกแบบ", m,
                      C.BYPASS_LABEL if out.get("bypass") else FAIL, "6.6.4.3"))
@@ -191,7 +196,7 @@ def summary(out):
         gs = out["gov_shear"]
         for d in ("y", "x"):
             sr = getattr(gs, "shear_" + d)
-            rows.append((f"แรงเฉือนทิศ {d} (สูงสุด)",
+            rows.append((f"แรงเฉือน {SHEAR_NAME[d]} (สูงสุด)",
                          f"Vu/φVn = {sr.ratio:.3f} — {gs.combo.name}", _st(sr.ok),
                          "22.5, 10.6.2, 10.7.6.5"))
         rows.append(("แรงเฉือนสองทิศ", f"ผลรวม {gs.biax_sum:.3f}", _st(all(r.biax_ok for r in res)),

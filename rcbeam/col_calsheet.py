@@ -20,46 +20,62 @@ def kN(x):
     return x / 1e3
 
 
-def column_svg(sec, size=210):
-    """หน้าตัดเสา: เหล็กรอบรูป ปลอก แกน x, y"""
-    b, h = sec.b, sec.h
-    pad = 40
+def column_svg(sec, size=230):
+    """หน้าตัดเสาแบบหน้าต่าง Prismatic ของ STAAD: ZD แนวนอน, YD แนวตั้ง, ลูกศร IZ / IY + เหล็กจริง"""
+    b, h = sec.b, sec.h                       # b = ZD, h = YD
+    pad = 46
     k = (size - 2 * pad) / max(b, h)
-    W, H = b * k + 2 * pad, h * k + 2 * pad
+    W, H = b * k + 2 * pad + 18, h * k + 2 * pad
     X0, Y0 = pad + b * k / 2, pad + h * k / 2
     px = lambda x: X0 + x * k  # noqa: E731
     py = lambda y: Y0 - y * k  # noqa: E731
     o = sec.cover + sec.ds / 2
+    L, R, T, B = px(-b / 2), px(b / 2), py(h / 2), py(-h / 2)
     s = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.0f}" height="{H:.0f}" '
-         f'viewBox="0 0 {W:.1f} {H:.1f}" font-family="Times New Roman, Liberation Serif, serif" '
+         f'viewBox="0 0 {W:.1f} {H:.1f}" font-family="Arial, Liberation Sans, sans-serif" '
          'font-size="11">',
-         '<defs><pattern id="ch" width="6" height="6" patternUnits="userSpaceOnUse" '
-         'patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#aaa" '
-         'stroke-width="0.6"/></pattern></defs>',
-         f'<rect x="{px(-b / 2):.1f}" y="{py(h / 2):.1f}" width="{b * k:.1f}" height="{h * k:.1f}"'
-         ' fill="url(#ch)" stroke="#000" stroke-width="1.1"/>',
+         '<defs><marker id="ar" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" '
+         'markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z"/></marker></defs>',
+         f'<rect x="{L:.1f}" y="{T:.1f}" width="{b * k:.1f}" height="{h * k:.1f}" fill="#bdbdbd" '
+         'stroke="#000" stroke-width="1"/>',
          f'<rect x="{px(-b / 2 + o):.1f}" y="{py(h / 2 - o):.1f}" width="{(b - 2 * o) * k:.1f}" '
          f'height="{(h - 2 * o) * k:.1f}" rx="{2 * sec.ds * k:.1f}" fill="none" stroke="#000" '
          f'stroke-width="{max(0.7, sec.ds * k):.1f}"/>']
     for br in sec.bars:
         s.append(f'<circle cx="{px(br.x):.1f}" cy="{py(br.y):.1f}" r="{max(1.5, br.db / 2 * k):.1f}"'
                  ' fill="#000"/>')
-    ax = 0.62 * max(b, h) * k
-    s.append(f'<line x1="{X0 - ax:.1f}" y1="{Y0:.1f}" x2="{X0 + ax:.1f}" y2="{Y0:.1f}" '
-             'stroke="#000" stroke-width="0.5" stroke-dasharray="6 2 1 2"/>')
-    s.append(f'<line x1="{X0:.1f}" y1="{Y0 + ax:.1f}" x2="{X0:.1f}" y2="{Y0 - ax:.1f}" '
-             'stroke="#000" stroke-width="0.5" stroke-dasharray="6 2 1 2"/>')
-    s.append(f'<text x="{X0 + ax + 3:.1f}" y="{Y0 + 4:.1f}" font-style="italic">x</text>')
-    s.append(f'<text x="{X0 - 3:.1f}" y="{Y0 - ax - 4:.1f}" font-style="italic">y</text>')
-    s.append(f'<text x="{X0:.1f}" y="{H - 8:.1f}" text-anchor="middle">b = {b:.0f}</text>')
-    s.append(f'<text transform="translate({12:.1f},{Y0:.1f}) rotate(-90)" text-anchor="middle">'
-             f'h = {h:.0f}</text>')
+    # แกน z (แนวนอน) และ y (แนวตั้ง) ผ่านศูนย์ถ่วง
+    s.append(f'<line x1="{L - 10:.1f}" y1="{Y0:.1f}" x2="{R + 14:.1f}" y2="{Y0:.1f}" stroke="#000" '
+             'stroke-width="0.7"/>')
+    s.append(f'<line x1="{X0:.1f}" y1="{T - 10:.1f}" x2="{X0:.1f}" y2="{B + 14:.1f}" stroke="#000" '
+             'stroke-width="0.7"/>')
+    # ลูกศรหมุน IZ (รอบแกน z) ที่ปลายขวา และ IY (รอบแกน y) ที่ปลายล่าง
+    zx = R + 14
+    s.append(f'<path d="M{zx:.1f},{Y0 - 12:.1f} a5,12 0 1,1 0,24" fill="none" stroke="#000" '
+             'stroke-width="0.9" marker-end="url(#ar)"/>')
+    s.append(f'<text x="{zx + 2:.1f}" y="{Y0 + 26:.1f}">IZ</text>')
+    yb = B + 14
+    s.append(f'<path d="M{X0 - 12:.1f},{yb:.1f} a12,5 0 1,0 24,0" fill="none" stroke="#000" '
+             'stroke-width="0.9" marker-end="url(#ar)"/>')
+    s.append(f'<text x="{X0 + 15:.1f}" y="{yb + 12:.1f}">IY</text>')
+    s.append(f'<text x="{zx + 10:.1f}" y="{Y0 + 4:.1f}" font-style="italic">z</text>')
+    s.append(f'<text x="{X0 + 4:.1f}" y="{T - 12:.1f}" font-style="italic">y</text>')
+    # มิติ ZD (บน) และ YD (ซ้าย)
+    dy = T - 22
+    s.append(f'<line x1="{L:.1f}" y1="{dy:.1f}" x2="{R:.1f}" y2="{dy:.1f}" stroke="#000" '
+             'stroke-width="0.7" marker-start="url(#ar)" marker-end="url(#ar)"/>')
+    s.append(f'<text x="{X0:.1f}" y="{dy - 4:.1f}" text-anchor="middle">ZD = {b:.0f}</text>')
+    dx = L - 22
+    s.append(f'<line x1="{dx:.1f}" y1="{T:.1f}" x2="{dx:.1f}" y2="{B:.1f}" stroke="#000" '
+             'stroke-width="0.7" marker-start="url(#ar)" marker-end="url(#ar)"/>')
+    s.append(f'<text transform="translate({dx - 5:.1f},{Y0:.1f}) rotate(-90)" text-anchor="middle">'
+             f'YD = {h:.0f}</text>')
     s.append("</svg>")
     return "".join(s)
 
 
 def contour_svg(sec, Pu, points, size=250):
-    """เส้นความจุ φMnx–φMny ที่ระดับ Pu พร้อมจุดโหลด (kN·m)"""
+    """เส้นความจุ φMnz–φMny ที่ระดับ Pu พร้อมจุดโหลด (kN·m) — แกนตั้ง Mz, แกนนอน My"""
     cont = C.contour_at(sec, Pu, 72)
     if not cont:
         return ""
@@ -86,9 +102,9 @@ def contour_svg(sec, Pu, points, size=250):
                  f'{kNm(v):,.0f}</text>')
         s.append(f'<text x="{c0 + 3:.1f}" y="{py(v) + 3:.1f}">{kNm(v):,.0f}</text>')
     s.append(f'<text x="{size - pad + 2}" y="{c0 - 4}" font-style="italic">M<tspan '
-             'font-size="7" dy="2">uy</tspan></text>')
+             'font-size="7" dy="2">y</tspan></text>')
     s.append(f'<text x="{c0 + 4}" y="{pad - 4}" font-style="italic">M<tspan font-size="7" '
-             'dy="2">ux</tspan></text>')
+             'dy="2">z</tspan></text>')
     marks = {"ปลายบน": ("#000", "▲"), "ปลายล่าง": ("#000", "▼")}
     for label, mx, my, cap in points:
         if math.isinf(mx) or math.isinf(my):
@@ -107,9 +123,10 @@ def contour_svg(sec, Pu, points, size=250):
 
 
 def _slender(D, inp, sec, S, axis, M_t, M_b, V):
-    name = "x" if axis == "x" else "y"
+    name = C.STAAD_AXIS[axis]                 # x ภายใน = แกน z ของ STAAD
     depth = sec.h if axis == "x" else sec.b
-    D.sub(f"ความชะลูดเมื่อดัดรอบแกน {name} (Slenderness about {name}-axis)")
+    dname = "YD" if axis == "x" else "ZD"
+    D.sub(f"ความชะลูดเมื่อดัดรอบแกน {name} (M{name}, ความลึก {dname})")
     if inp.r_method == "0.3h":
         D.eq(rf"r = 0.3\,h = 0.3{X}{depth:.0f} = {_n(S.r)}\ \mathrm{{mm}}", ref="ACI 6.2.5.2")
     else:
@@ -167,9 +184,9 @@ def _capacity_detail(D, sec, Pu, label, mx, my, cap):
     D.sub(f"ตรวจแรงอัดร่วมดัดสองแกน ณ {label} (Biaxial Interaction)")
     D.p("หาความลึกแกนสะเทิน c และมุม θ ที่ทำให้ φP<sub>n</sub> = P<sub>u</sub> และทิศโมเมนต์"
         "ความจุตรงกับทิศโหลด (ตัด 3D interaction surface ที่ระดับ P<sub>u</sub>):")
-    D.eq(rf"M_{{res}} = \sqrt{{M_{{ux}}^2+M_{{uy}}^2}} = \sqrt{{{_n(kNm(mx))}^2+{_n(kNm(my))}^2}}"
+    D.eq(rf"M_{{res}} = \sqrt{{M_z^2+M_y^2}} = \sqrt{{{_n(kNm(mx))}^2+{_n(kNm(my))}^2}}"
          rf" = {_n(kNm(cap.Mres))}\ \mathrm{{kN\cdot m}}, \qquad \alpha = \tan^{{-1}}"
-         rf"\frac{{|M_{{uy}}|}}{{|M_{{ux}}|}} = {math.degrees(math.atan2(abs(my), abs(mx))):.1f}^\circ")
+         rf"\frac{{|M_y|}}{{|M_z|}} = {math.degrees(math.atan2(abs(my), abs(mx))):.1f}^\circ")
     pt = cap.pt
     D.eq(rf"\theta_{{NA}} = {math.degrees(pt.theta) % 360:.1f}^\circ, \qquad c = {_n(pt.c, 1)}\ "
          rf"\mathrm{{mm}}, \qquad a = \beta_1 c = {_n(pt.a, 1)}\ \mathrm{{mm}}",
@@ -184,16 +201,16 @@ def _capacity_detail(D, sec, Pu, label, mx, my, cap):
         F = br.area * (fs - 0.85 * sec.fc) if (fs > 0 and y <= pt.a) else br.area * fs
         rows.append(f"<tr><td>({br.x:+.0f}, {br.y:+.0f})</td><td>{y:.1f}</td><td>{eps:+.5f}</td>"
                     f"<td>{fs:+.1f}</td><td>{F / 1e3:+.1f}</td></tr>")
-    hdr = "".join(f"<th>{tex(t, 10.5)}</th>" for t in (r"(x,\,y)\ \mathrm{mm}", r"d_i\ (\mathrm{mm})",
+    hdr = "".join(f"<th>{tex(t, 10.5)}</th>" for t in (r"(z,\,y)\ \mathrm{mm}", r"d_i\ (\mathrm{mm})",
                                                         r"\varepsilon_s", r"f_s\ (\mathrm{MPa})",
                                                         r"F\ (\mathrm{kN})"))
     D.raw(f'<table class="grid num"><thead><tr>{hdr}</tr></thead><tbody>{"".join(rows)}'
           "</tbody></table>")
     D.eq(rf"\varepsilon_t = {pt.et:.5f} \quad\Rightarrow\quad \phi = {pt.phi:.3f}",
          ref="ACI Table 21.2.2")
-    D.eq(rf"\phi P_n = {_n(kN(pt.phiPn), 1)}\ \mathrm{{kN}} = P_u, \qquad \phi M_{{nx}} = "
+    D.eq(rf"\phi P_n = {_n(kN(pt.phiPn), 1)}\ \mathrm{{kN}} = P_u, \qquad \phi M_{{nz}} = "
          rf"{_n(kNm(pt.phiMnx))}, \quad \phi M_{{ny}} = {_n(kNm(pt.phiMny))}\ \mathrm{{kN\cdot m}}")
-    D.eq(rf"\phi M_{{cap}} = \sqrt{{\phi M_{{nx}}^2+\phi M_{{ny}}^2}} = {_n(kNm(cap.phiMcap))}\ "
+    D.eq(rf"\phi M_{{cap}} = \sqrt{{\phi M_{{nz}}^2+\phi M_{{ny}}^2}} = {_n(kNm(cap.phiMcap))}\ "
          r"\mathrm{kN\cdot m}")
     D.eq(rf"\frac{{M_{{res}}}}{{\phi M_{{cap}}}} = \frac{{{_n(kNm(cap.Mres))}}}"
          rf"{{{_n(kNm(cap.phiMcap))}}} = {cap.ratio:.3f}\ {_le(cap.ratio <= 1)}\ 1.0",
@@ -203,7 +220,8 @@ def _capacity_detail(D, sec, Pu, label, mx, my, cap):
 def _shear(D, sec, sr, label, omf):
     rf = C.sqrt_fc(sec.fc)
     bw, d = sr.bw, sr.d
-    D.sub(f"แรงเฉือนทิศ {label} (Shear along {label})")
+    D.sub("แรงเฉือน " + {"y": "F<sub>y</sub> (คู่กับ M<sub>z</sub>, b<sub>w</sub> = ZD)",
+                         "x": "F<sub>z</sub> (คู่กับ M<sub>y</sub>, b<sub>w</sub> = YD)"}[label])
     if omf and omf.get("applies"):
         D.eq(rf"V_{{u1}} = \frac{{M_{{nt}}+M_{{nb}}}}{{l_u}} = \frac{{{_n(kNm(omf['Mnt']))}+"
              rf"{_n(kNm(omf['Mnb']))}}}{{l_u}} = {_n(kN(omf['Vu1']), 1)}\ \mathrm{{kN}}",
@@ -256,7 +274,7 @@ def build_column_calsheet(proj, out):
     D.h("ข้อมูลออกแบบ", "Design Data")
     nbar = len(sec.bars)
     D.raw('<div class="datawrap"><div class="data">')
-    D.eq(rf"b \times h = {sec.b:.0f} \times {sec.h:.0f}\ \mathrm{{mm}}, \qquad "
+    D.eq(rf"YD \times ZD = {sec.h:.0f} \times {sec.b:.0f}\ \mathrm{{mm}}, \qquad "
          rf"A_g = {_n(sec.Ag, 0)}\ \mathrm{{mm^2}}")
     D.eq(rf"{nbar}\ \mathrm{{DB}}{inp.db:g}: \quad A_{{st}} = {nbar}{X}\frac{{\pi{X}{inp.db:g}^2}}{{4}}"
          rf" = {_n(sec.Ast, 1)}\ \mathrm{{mm^2}}, \quad \rho_g = {_n(sec.rho * 100)}\%")
@@ -264,10 +282,10 @@ def build_column_calsheet(proj, out):
          rf"c_c = {_n(sec.cover, 1)}\ \mathrm{{mm\ (to\ ties)}}")
     D.eq(rf"{FC} = {_n(sec.fc)}\ \mathrm{{MPa}}, \qquad f_y = {_n(sec.fy)}, \quad f_{{yt}} = "
          rf"{_n(sec.fyt)}\ \mathrm{{MPa}}")
-    D.eq(rf"l_{{u,x}} = {inp.lu_x:,.0f}, \quad l_{{u,y}} = {inp.lu_y:,.0f}\ \mathrm{{mm}}, \qquad "
-         rf"k_x = {inp.k_x:g}, \quad k_y = {inp.k_y:g}, \qquad \beta_{{dns}} = {inp.beta_dns:g}"
+    D.eq(rf"l_{{u,z}} = {inp.lu_x:,.0f}, \quad l_{{u,y}} = {inp.lu_y:,.0f}\ \mathrm{{mm}}, \qquad "
+         rf"k_z = {inp.k_x:g}, \quad k_y = {inp.k_y:g}, \qquad \beta_{{dns}} = {inp.beta_dns:g}"
          .replace(",", "{,}"))
-    D.raw(f'</div><div class="fig">{column_svg(sec)}<br>รูปที่ 1 หน้าตัดเสา (มม.)</div></div>')
+    D.raw(f'</div><div class="fig">{column_svg(sec)}<br>รูปที่ 1 หน้าตัดเสา (มม.) แกนแบบ STAAD</div></div>')
 
     rows = "".join(
         f"<tr><td>{_e(r.combo.name)}</td><td>{kN(r.combo.Pu):,.1f}</td>"
@@ -276,12 +294,13 @@ def build_column_calsheet(proj, out):
         f"<td>{kN(r.combo.Vuy):,.2f}</td><td>{kN(r.combo.Vux):,.2f}</td></tr>"
         for r in out["results"])
     hdr = "".join(f"<th>{tex(t, 10.5)}</th>" for t in (
-        r"\mathrm{Combo}", r"P_u", r"M_{ux,top}", r"M_{ux,bot}", r"M_{uy,top}", r"M_{uy,bot}",
-        r"V_{uy}", r"V_{ux}"))
+        r"\mathrm{Combo}", r"P_u", r"M_{z,top}", r"M_{z,bot}", r"M_{y,top}", r"M_{y,bot}",
+        r"F_y", r"F_z"))
     D.sub("แรงประลัย (Factored Loads) หน่วย kN, kN·m")
     D.raw(f'<table class="grid num full"><thead><tr>{hdr}</tr></thead><tbody>{rows}</tbody></table>')
 
     D.h("การจำแนกโครง sway / non-sway", "Stability Index")
+    lab = lambda d: (inp.dir_labels or {}).get(d, d.upper())  # noqa: E731
     if out.get("bypass"):
         D.raw(f'<div class="result"><b>ข้ามการตรวจ sway — วิศวกรยืนยันว่าเป็นโครง non-sway</b><br>'
               f'{_e(out["gate_msgs"][0])}<br><i>ผลการออกแบบใช้ได้เฉพาะเมื่อโครงเป็น non-sway จริง '
@@ -295,12 +314,12 @@ def build_column_calsheet(proj, out):
         for c in out["classes"]:
             mark = (' style="font-weight:700"' if c.story == str(inp.story_name) else "")
             for cb, P, V, do, lc, Q in c.rows:
-                trs.append(f"<tr{mark}><td>{_e(c.story)}</td><td>{c.direction.upper()}</td>"
+                trs.append(f"<tr{mark}><td>{_e(c.story)}</td><td>{lab(c.direction)}</td>"
                            f"<td>{_e(cb)}</td><td>{kN(P):,.1f}</td><td>{kN(V):,.2f}</td>"
                            f"<td>{do:g}</td><td>{lc / 1000:g}</td><td>{Q:.4f}</td>"
                            f"<td>{_e(c.status) if cb == c.combo else ''}</td></tr>")
             if not c.rows:
-                trs.append(f"<tr{mark}><td>{_e(c.story)}</td><td>{c.direction.upper()}</td>"
+                trs.append(f"<tr{mark}><td>{_e(c.story)}</td><td>{lab(c.direction)}</td>"
                            f"<td colspan='7'>{_e(c.status)}</td></tr>")
         D.raw('<table class="grid num full"><thead><tr><th>ชั้น</th><th>ทิศ</th><th>Combo</th>'
               "<th>ΣP<sub>u</sub> (kN)</th><th>V<sub>us</sub> (kN)</th><th>Δ<sub>o</sub> (mm)</th>"
@@ -310,14 +329,14 @@ def build_column_calsheet(proj, out):
             if not c.rows:
                 continue
             g = next(r for r in c.rows if r[0] == c.combo)
-            D.eq(rf"Q_{{{c.direction}}} = \frac{{{_n(kN(g[1]), 1)}{X}{g[3]:g}}}{{{_n(kN(g[2]), 2)}"
+            D.eq(rf"Q_{{{lab(c.direction)}}} = \frac{{{_n(kN(g[1]), 1)}{X}{g[3]:g}}}{{{_n(kN(g[2]), 2)}"
                  rf"{X}{_n(g[4], 0)}}} = {c.Q_max:.4f}\ {_le(c.Q_max <= 0.05)}\ 0.05",
                  ref="ACI 6.6.4.4.1", check=c.status == "non-sway",
-                 note=f"ชั้น {_e(c.story)} ทิศ {c.direction.upper()}: {_e(c.status)}")
+                 note=f"ชั้น {_e(c.story)} ทิศ {lab(c.direction)}: {_e(c.status)}")
             for n in c.notes:
                 D.p(f"<i>หมายเหตุ: {_e(n)}</i>")
-        D.p(f"เสาต้นนี้อยู่ชั้น <b>{_e(inp.story_name)}</b> — การดัดรอบแกน x ใช้ผลการเซทิศ Y "
-            "และการดัดรอบแกน y ใช้ผลการเซทิศ X")
+        D.p(f"เสาต้นนี้อยู่ชั้น <b>{_e(inp.story_name)}</b> — M<sub>z</sub> ใช้ผลการเซทิศ "
+            f"{lab('y')} และ M<sub>y</sub> ใช้ผลการเซทิศ {lab('x')}")
     else:
         D.p("ไม่ได้ป้อนข้อมูลชั้น — สมมติว่าเป็นโครง non-sway (ต้องยืนยันด้วย Q ≤ 0.05 ตาม ACI 6.6.4.3)")
     if out["sway"]:
@@ -347,7 +366,7 @@ def build_column_calsheet(proj, out):
     if cap is not None and cap.pt is not None:
         _capacity_detail(D, sec, cb.Pu, label, mx, my, cap)
         svg = contour_svg(sec, cb.Pu, g.points)
-        D.raw(f'<div class="fig" style="margin:6px 0">{svg}<br>รูปที่ 2 เส้นความจุ φM<sub>nx</sub>'
+        D.raw(f'<div class="fig" style="margin:6px 0">{svg}<br>รูปที่ 2 เส้นความจุ φM<sub>nz</sub>'
               f"–φM<sub>ny</sub> ที่ P<sub>u</sub> = {kN(cb.Pu):,.1f} kN ({_e(cb.name)}) · "
               "▲ ปลายบน ▼ ปลายล่าง ● กลางเสา (kN·m)</div>")
     D.sub("ผลทุก Combination")
@@ -366,7 +385,7 @@ def build_column_calsheet(proj, out):
                        f"<td>{kNm(cp.phiMcap):,.2f}</td><td>{_status('ผ่าน' if cp.ok else 'ไม่ผ่าน')} "
                        f"{cp.ratio:.3f}</td></tr>")
     D.raw('<table class="grid num full"><thead><tr><th>Combo</th><th>ตำแหน่ง</th>'
-          "<th>M<sub>ux</sub></th><th>M<sub>uy</sub></th><th>M<sub>res</sub></th>"
+          "<th>M<sub>z</sub></th><th>M<sub>y</sub></th><th>M<sub>res</sub></th>"
           "<th>φM<sub>cap</sub></th><th>ratio</th></tr></thead><tbody>"
           + "".join(trs) + "</tbody></table>")
 
@@ -374,7 +393,7 @@ def build_column_calsheet(proj, out):
     D.h(f"การออกแบบรับแรงเฉือน — Combination {_e(gs.combo.name)}", "Shear Design")
     _shear(D, sec, gs.shear_y, "y", gs.omf_y)
     _shear(D, sec, gs.shear_x, "x", gs.omf_x)
-    D.eq(rf"\frac{{V_{{ux}}}}{{\phi V_{{nx}}}} + \frac{{V_{{uy}}}}{{\phi V_{{ny}}}} = "
+    D.eq(rf"\frac{{F_z}}{{\phi V_{{n,z}}}} + \frac{{F_y}}{{\phi V_{{n,y}}}} = "
          rf"{gs.shear_x.ratio:.3f}+{gs.shear_y.ratio:.3f} = {gs.biax_sum:.3f}", ref="ACI 22.5.1.11",
          check=gs.biax_ok, note="(ตรวจเมื่อทั้งสองอัตราส่วน > 0.5)")
 
@@ -393,6 +412,8 @@ def build_column_calsheet(proj, out):
 <li>ACI 318M-19; strain compatibility (22.2), stress block 0.85f′c, φ ตาม ε<sub>t</sub> (Table 21.2.2)
 ε<sub>ty</sub> = {'0.002 (Grade 420)' if sec.grade420 else 'f<sub>y</sub>/E<sub>s</sub>'}</li>
 <li>3D interaction: ตัด surface ที่ P<sub>u</sub> และวัดตามทิศของโมเมนต์ลัพธ์ (ไม่เทียบกับเส้นแกนเดียว)</li>
+<li>ชื่อแกนตาม STAAD.Pro: YD = ความลึกตามแกน local y, ZD = ความกว้างตามแกน local z; M<sub>z</sub> ใช้ความลึก YD
+คู่กับ F<sub>y</sub>, M<sub>y</sub> ใช้ความลึก ZD คู่กับ F<sub>z</sub>; P = F<sub>x</sub> ที่ start node (บวก = อัด)</li>
 <li>ทิศการดัด (M<sub>1</sub>/M<sub>2</sub>) ตัดสินจากสมดุลแรงเฉือน; M<sub>1</sub> = M<sub>2</sub> = 0 ใช้ −1 (เกณฑ์ 22)</li>
 <li>r = {'0.3h' if inp.r_method == '0.3h' else '√(I<sub>g</sub>/A<sub>g</sub>)'}, (EI)<sub>eff</sub> วิธี
 ({inp.EI_method}), β<sub>dns</sub> = {inp.beta_dns:g}; กลางเสาใช้ M<sub>c</sub> ของทั้งสองแกนพร้อมกัน</li>

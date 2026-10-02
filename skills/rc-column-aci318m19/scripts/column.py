@@ -438,7 +438,7 @@ SWAY_CLOSED = "การออกแบบเสาในโครง sway ป�
 BYPASS_LABEL = "ผู้ใช้ยืนยัน"
 
 
-def nonsway_gate(classes, story, bypass_reason=""):
+def nonsway_gate(classes, story, bypass_reason="", labels=None):
     """ด่านบังคับก่อนออกแบบ: ชั้นของเสาต้องมีผลจำแนกครบทั้งทิศ x และ y และเป็น non-sway ทั้งคู่
 
     คืน (ผ่านหรือไม่, รายการข้อความ) — ไม่ผ่านเมื่อ: ไม่มีข้อมูลชั้น/ทิศ, ไม่มี combo ที่มีแรงด้านข้าง,
@@ -449,26 +449,29 @@ def nonsway_gate(classes, story, bypass_reason=""):
     (ออกแบบแบบ non-sway จะได้โมเมนต์ต่ำกว่าจริง) ข้อความแรกขึ้นต้นด้วย BYPASS_LABEL เมื่อข้าม
     """
     mine = {c.direction: c for c in classes if c.story == str(story)}
+    lab = labels or {"x": "x", "y": "y"}          # ชื่อทิศที่ใช้ในข้อความ
     reason = (bypass_reason or "").strip()
     if reason:
         sway = [d for d, c in mine.items() if c.status == "sway"]
         if sway:
-            return False, [f"ข้ามการตรวจ sway ไม่ได้: ข้อมูลชั้น {story} ทิศ {', '.join(sway)} "
+            return False, [f"ข้ามการตรวจ sway ไม่ได้: ข้อมูลชั้น {story} ทิศ "
+                           f"{', '.join(lab.get(d, d) for d in sway)} "
                            f"แสดงว่าเป็น sway (Q > 0.05) — {SWAY_CLOSED}"]
         return True, [f"{BYPASS_LABEL}: ข้ามการตรวจ sway ชั้น {story} โดยวิศวกรยืนยันว่าเป็น "
                       f"non-sway — เหตุผล: {reason}"]
     msgs = []
     for d in ("x", "y"):
         c = mine.get(d)
+        n = lab.get(d, d)
         if c is None:
-            msgs.append(f"ชั้น {story} ไม่มีข้อมูลทิศ {d} — ต้องตรวจ sway ทั้งสองทิศก่อนออกแบบ")
+            msgs.append(f"ชั้น {story} ไม่มีข้อมูลทิศ {n} — ต้องตรวจ sway ทั้งสองทิศก่อนออกแบบ")
         elif c.status == "sway":
-            msgs.append(f"ชั้น {story} ทิศ {d}: Q = {c.Q_max:.4f} > 0.05 → sway — {SWAY_CLOSED}")
+            msgs.append(f"ชั้น {story} ทิศ {n}: Q = {c.Q_max:.4f} > 0.05 → sway — {SWAY_CLOSED}")
         elif c.status == "ต้องยืนยัน":
-            msgs.append(f"ชั้น {story} ทิศ {d}: ต้องยืนยัน — Q/0.35 = {c.Q_upper:.4f} > 0.05 "
+            msgs.append(f"ชั้น {story} ทิศ {n}: ต้องยืนยัน — Q/0.35 = {c.Q_upper:.4f} > 0.05 "
                         "รันโมเดลที่ลด stiffness แล้วป้อน Δo ใหม่")
         elif c.status != "non-sway":
-            msgs.append(f"ชั้น {story} ทิศ {d}: {c.status} — {'; '.join(c.notes)}")
+            msgs.append(f"ชั้น {story} ทิศ {n}: {c.status} — {'; '.join(c.notes)}")
     return not msgs, msgs
 
 
@@ -591,22 +594,39 @@ def slenderness(sec, axis, lu, Pu, M_top, M_bot, k=1.0, V=None, L=None, curvatur
 
 
 # ---------------------------------------------------------------- นำเข้าแรงจาก STAAD.Pro
-def from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, beta90=False, flip_axial=False):
+# ชื่อแกนแบบ STAAD.Pro (หน้าต่าง Prismatic): ZD แนวนอน = b (แกน x ภายใน ↔ local z),
+# YD แนวตั้ง = h (แกน y ภายใน ↔ local y) → Mx ภายใน = Mz, My = My, Vuy = Fy, Vux = Fz
+STAAD_AXIS = {"x": "z", "y": "y"}
+
+
+def from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, flip_axial=False):
     """แปลง member end forces ของ STAAD (แกน local, ค่าที่ start และ end node) เป็นแรงของสกิล
 
-    การจับคู่ (beta = 0): Mz (ดัดรอบ local z ใช้ความลึก YD) → Mx (ความลึก h), Fy → Vuy;
-                          My (ใช้ความลึก ZD) → My (ความลึก b), Fz → Vux; YD = h, ZD = b
-    beta90=True สลับคู่แกน (เสาหมุน 90°)
+    YD/ZD ของหน้าตัดกับแรงในตาราง member end forces อยู่ในแกน local ชุดเดียวกัน จึงจับคู่ตรง
+    ไม่ขึ้นกับ beta angle: Mz (ดัดรอบ local z ใช้ความลึก YD = h) → Mx ภายใน, Fy → Vuy;
+    My (ใช้ความลึก ZD = b) → My, Fz → Vux  (beta มีผลเฉพาะการจับคู่ทิศการเซของชั้น ดู staad_sway_dir)
     P = Fx ที่ start node (ใน member end forces ของ STAAD ค่าบวกที่ start = แรงอัด) —
     flip_axial กลับเครื่องหมายถ้าข้อมูลมาจากแหล่งที่ใช้ convention ต่างกัน
     โมเมนต์ใช้ขนาด (หน้าตัดเหล็กสมมาตร) ทิศการดัดตัดสินภายหลังจากสมดุลแรงเฉือน
     คืน dict: Pu, Mxt, Mxb, Myt, Myb, Vuy, Vux (หน่วยเดียวกับที่ป้อน)
     """
-    Mx_s, Mx_e, Vy = (mz_s, mz_e, fy_s) if not beta90 else (my_s, my_e, fz_s)
-    My_s, My_e, Vx = (my_s, my_e, fz_s) if not beta90 else (mz_s, mz_e, fy_s)
     return {"Pu": -fx_s if flip_axial else fx_s,
-            "Mxt": abs(Mx_e), "Mxb": abs(Mx_s), "Myt": abs(My_e), "Myb": abs(My_s),
-            "Vuy": abs(Vy), "Vux": abs(Vx)}
+            "Mxt": abs(mz_e), "Mxb": abs(mz_s), "Myt": abs(my_e), "Myb": abs(my_s),
+            "Vuy": abs(fy_s), "Vux": abs(fz_s)}
+
+
+def staad_sway_dir(global_dir, beta90=False):
+    """ทิศการเซของชั้นในแกนโลก STAAD (X หรือ Z; Y คือแนวดิ่ง) → ทิศภายในที่ใช้ใน classify/gate
+
+    เสาตั้ง beta = 0: local z ขนานโลก Z → การเซทิศ X ทำให้เกิด Mz (Mx ภายใน → ทิศภายใน "y"),
+    การเซทิศ Z ทำให้เกิด My (ทิศภายใน "x"); beta = 90° สลับกัน  ⚠️ ยืนยันกับโมเดลจริง
+    """
+    g = str(global_dir).strip().upper()
+    if g not in ("X", "Z"):
+        raise ValueError("ทิศการเซของชั้นต้องเป็น X หรือ Z (แกนโลก STAAD)")
+    if beta90:
+        g = "Z" if g == "X" else "X"
+    return "y" if g == "X" else "x"
 
 
 def check_axial_sign(rows):

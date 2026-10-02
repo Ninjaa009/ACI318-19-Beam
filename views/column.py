@@ -9,7 +9,7 @@ import streamlit.components.v1 as components
 
 from rcbeam import units as u
 from rcbeam.calsheet import ProjectInfo
-from rcbeam.col_calsheet import build_column_calsheet
+from rcbeam.col_calsheet import build_column_calsheet, column_svg
 from rcbeam.colcheck import C, ColumnInput, Combo, PASS, FAIL, run
 
 BARS = [12, 16, 19.1, 20, 25, 28, 32, 36]
@@ -17,7 +17,7 @@ TIES = [6, 9, 9.5, 10, 12]
 CURV = ["auto", "single", "double"]
 
 st.title("ออกแบบ/ตรวจสอบเสา คสล. ตาม ACI 318M-19")
-st.caption("หน้าตัดสี่เหลี่ยม ปลอกเดี่ยว · โครง non-sway · 3D interaction (P–Mx–My) · "
+st.caption("หน้าตัดสี่เหลี่ยม ปลอกเดี่ยว · โครง non-sway · 3D interaction (P–Mz–My) · ชื่อแกนตาม STAAD.Pro · "
            "ความชะลูด + ขยายโมเมนต์ · แรงเฉือนสองทิศ · ใช้ solver ของ skill rc-column-aci318m19")
 
 # ---------------------------------------------------------------- sidebar
@@ -39,30 +39,40 @@ with st.sidebar:
                            disabled=abs(fy - 420) > 0.5, key="c_g420")
 
     st.header("หน้าตัดและเหล็ก")
-    b = u.m_to_mm(st.number_input("b (m) ตามแกน x", 0.15, 2.0, 0.40, 0.05, format="%.2f", key="c_b"))
-    h = u.m_to_mm(st.number_input("h (m) ตามแกน y", 0.15, 2.0, 0.40, 0.05, format="%.2f", key="c_h"))
+    h = u.m_to_mm(st.number_input("YD (m) — ความลึกตามแกน local y", 0.15, 2.0, 0.40, 0.05,
+                                  format="%.2f", key="c_h", help="ตรงกับ YD ในหน้าต่าง Prismatic ของ STAAD"))
+    b = u.m_to_mm(st.number_input("ZD (m) — ความกว้างตามแกน local z", 0.15, 2.0, 0.40, 0.05,
+                                  format="%.2f", key="c_b", help="ตรงกับ ZD ในหน้าต่าง Prismatic ของ STAAD"))
     cover = st.number_input("cover (mm)", 20.0, 100.0, 40.0, 5.0, key="c_cov")
     cover_to = st.radio("cover วัดถึง", ["tie", "long"], horizontal=True, key="c_covto",
                         format_func=lambda x: {"tie": "ผิวปลอก (ACI)", "long": "เหล็กยืน (RCDC)"}[x])
     db = st.selectbox("เหล็กยืน DB (mm)", BARS, index=3, key="c_db")
     c1, c2 = st.columns(2)
-    nx = c1.number_input("เส้น/ด้าน b", 2, 12, 3, 1, key="c_nx")
-    ny = c2.number_input("เส้น/ด้าน h", 2, 12, 3, 1, key="c_ny")
+    nx = c1.number_input("เส้น/ด้าน ZD", 2, 12, 3, 1, key="c_nx")
+    ny = c2.number_input("เส้น/ด้าน YD", 2, 12, 3, 1, key="c_ny")
     ds = st.selectbox("ปลอก (mm)", TIES, index=3, key="c_ds")
     s = st.number_input("ระยะปลอก s (mm)", 50.0, 600.0, 250.0, 25.0, key="c_s")
     c1, c2 = st.columns(2)
-    legs_x = c1.number_input("ขาปลอกทิศ x", 2, 8, 2, 1, key="c_lx")
-    legs_y = c2.number_input("ขาปลอกทิศ y", 2, 8, 2, 1, key="c_ly")
+    legs_y = c1.number_input("ขาปลอกรับ Fy", 2, 8, 2, 1, key="c_ly", help="ขาที่ขนานแกน y (ตาม YD)")
+    legs_x = c2.number_input("ขาปลอกรับ Fz", 2, 8, 2, 1, key="c_lx", help="ขาที่ขนานแกน z (ตาม ZD)")
     dagg = st.number_input("ขนาดหินใหญ่สุด (mm)", 10.0, 40.0, 20.0, 5.0, key="c_agg")
     cover_min = st.number_input("cover ขั้นต่ำที่ต้องการ (mm)", 20.0, 75.0, 40.0, 5.0, key="c_covmin",
                                 help="Table 20.5.1.3.1 — เสาในอาคาร 40 mm")
+    try:
+        _bars, _tc = C.rect_bars(b, h, cover, float(ds), float(db), int(nx), int(ny), cover_to)
+        st.markdown(column_svg(C.Section(b, h, fc, fy, fyt, _bars, _tc, float(ds))),
+                    unsafe_allow_html=True)
+        st.caption("หน้าตัดตามหน้าต่าง Prismatic ของ STAAD: Mz ดัดรอบแกน z (ความลึก YD), "
+                   "My ดัดรอบแกน y (ความลึก ZD)")
+    except ValueError as e:
+        st.error(f"หน้าตัด: {e}")
 
     st.header("ความยาวและความชะลูด")
     c1, c2 = st.columns(2)
-    lu_x = u.m_to_mm(c1.number_input("l_u ดัดรอบ x (m)", 0.5, 30.0, 4.5, 0.1, key="c_lux"))
-    lu_y = u.m_to_mm(c2.number_input("l_u ดัดรอบ y (m)", 0.5, 30.0, 4.5, 0.1, key="c_luy"))
-    k_x = c1.number_input("k_x", 0.5, 1.0, 1.0, 0.05, key="c_kx")
-    k_y = c2.number_input("k_y", 0.5, 1.0, 1.0, 0.05, key="c_ky")
+    lu_x = u.m_to_mm(c1.number_input("l_u ของ Mz (m)", 0.5, 30.0, 4.5, 0.1, key="c_lux"))
+    lu_y = u.m_to_mm(c2.number_input("l_u ของ My (m)", 0.5, 30.0, 4.5, 0.1, key="c_luy"))
+    k_x = c1.number_input("k ของ Mz", 0.5, 1.0, 1.0, 0.05, key="c_kx")
+    k_y = c2.number_input("k ของ My", 0.5, 1.0, 1.0, 0.05, key="c_ky")
     L = u.m_to_mm(st.number_input("ความยาวชิ้นส่วน c/c (m)", 0.5, 30.0, 5.0, 0.1, key="c_L",
                                   help="ใช้ตัดสินทิศการดัดจากแรงเฉือน |V|·L"))
     beta = st.number_input("βdns", 0.0, 1.0, 0.6, 0.05, key="c_beta",
@@ -108,17 +118,19 @@ def show_classes(classes):
     rows = []
     for c in classes:
         for cb, P, V, do, lc_, Q in c.rows:
-            rows.append({"ชั้น": c.story, "ทิศ": c.direction, "Combo": cb, f"ΣPu ({fu})": fF(P),
+            rows.append({"ชั้น": c.story, "ทิศ": DIRL.get(c.direction, c.direction), "Combo": cb, f"ΣPu ({fu})": fF(P),
                          f"Vus ({fu})": fF(V), "Δo (mm)": do, "lc (m)": lc_ / 1000, "Q": Q,
                          "ผล (Q max ของชั้น/ทิศ)": c.status if cb == c.combo else ""})
         if not c.rows:
-            rows.append({"ชั้น": c.story, "ทิศ": c.direction, "ผล (Q max ของชั้น/ทิศ)": c.status})
+            rows.append({"ชั้น": c.story, "ทิศ": DIRL.get(c.direction, c.direction),
+                         "ผล (Q max ของชั้น/ทิศ)": c.status})
     if rows:
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
                      column_config={"Q": st.column_config.NumberColumn(format="%.4f")})
     for c in classes:
         for n in c.notes:
-            (st.warning if c.status == "ต้องยืนยัน" else st.info)(f"ชั้น {c.story} ทิศ {c.direction}: {n}")
+            (st.warning if c.status == "ต้องยืนยัน" else st.info)(
+                f"ชั้น {c.story} ทิศ {DIRL.get(c.direction, c.direction)}: {n}")
 
 
 # ---------------------------------------------------------------- ขั้นที่ 1: ด่านตรวจ sway
@@ -126,16 +138,20 @@ st.header("ขั้นที่ 1 · ตรวจ sway / non-sway (บังค
 st.caption(f"ACI 6.6.4.3: Q = ΣPu·Δo/(Vus·lc) ≤ 0.05 → non-sway · ป้อนทุกชั้น ทุกทิศ ทุก combo ที่มีแรงด้านข้าง · "
            f"ΣPu รวมทุกเสา/ผนังในชั้น · Vus = แรงเฉือนของชั้น (ไม่ใช่ base shear) · Δo = ค่าบน − ค่าล่าง "
            f"จากการวิเคราะห์ลำดับหนึ่งของโมเดลที่ลด stiffness · lc = ความสูงชั้น c/c · แรงหน่วย {fu}")
+beta90 = st.checkbox("เสาตั้ง beta angle = 90° (การเซทิศ X ทำให้เกิด My แทน Mz)", key="c_beta90",
+                     help="beta = 0: local z ขนานโลก Z → เซทิศ X → Mz, เซทิศ Z → My ⚠️ ยืนยันกับโมเดล")
+DIRL = {C.staad_sway_dir("X", beta90): "X", C.staad_sway_dir("Z", beta90): "Z"}   # ภายใน → โลก
 story_default = pd.DataFrame([
-    {"ชั้น": "1", "ทิศ": "x", "Combo": "W+X", "ΣPu": 24000.0, "Vus": 900.0, "Δo (mm)": 3.2,
+    {"ชั้น": "1", "ทิศ": "X", "Combo": "W+X", "ΣPu": 24000.0, "Vus": 900.0, "Δo (mm)": 3.2,
      "lc (m)": 5.0, "ลด stiffness แล้ว": True},
-    {"ชั้น": "1", "ทิศ": "y", "Combo": "W+Y", "ΣPu": 24000.0, "Vus": 900.0, "Δo (mm)": 3.2,
+    {"ชั้น": "1", "ทิศ": "Z", "Combo": "W+Z", "ΣPu": 24000.0, "Vus": 900.0, "Δo (mm)": 3.2,
      "lc (m)": 5.0, "ลด stiffness แล้ว": True},
 ])
 sdf = st.data_editor(
     story_default, num_rows="dynamic", width="stretch", key="c_stories",
     column_config={
-        "ทิศ": st.column_config.SelectboxColumn(options=["x", "y"], required=True),
+        "ทิศ": st.column_config.SelectboxColumn("ทิศ (โลก)", options=["X", "Z"], required=True,
+                                               help="ทิศการเซตามแกนโลก STAAD (Y = แนวดิ่ง)"),
         "ΣPu": num(f"ΣPu ({fu})"), "Vus": num(f"Vus ({fu})"),
         "ลด stiffness แล้ว": st.column_config.CheckboxColumn(
             help="Δo จากโมเดลที่ใช้ 0.35Ig คาน / 0.70Ig เสา (ACI 6.6.3.1.1)"),
@@ -144,7 +160,7 @@ stories = []
 for _, r in sdf.iterrows():
     if pd.isna(r.get("ชั้น")) or pd.isna(r.get("ΣPu")):
         continue
-    stories.append(dict(story=str(r["ชั้น"]), direction=r.get("ทิศ") or "x",
+    stories.append(dict(story=str(r["ชั้น"]), direction=C.staad_sway_dir(r.get("ทิศ") or "X", beta90),
                         combo=str(r.get("Combo") or ""), sumPu=val(r["ΣPu"]) * F,
                         Vus=val(r["Vus"]) * F, delta_o=val(r["Δo (mm)"]),
                         lc=u.m_to_mm(val(r["lc (m)"])), reduced=bool(r.get("ลด stiffness แล้ว"))))
@@ -162,13 +178,13 @@ if bypass:
         st.warning("ต้องใส่เหตุผลก่อนจึงจะข้ามการตรวจ sway ได้")
 
 classes = C.classify_stories(stories)
-gate_ok, gate_msgs = C.nonsway_gate(classes, story_name, bypass_reason)
+gate_ok, gate_msgs = C.nonsway_gate(classes, story_name, bypass_reason, DIRL)
 bypassed = gate_ok and bool(gate_msgs)
 mine = {c.direction: c for c in classes if c.story == str(story_name)}
 g1, g2 = st.columns(2)
-for col, d, ax in ((g1, "x", "My (ดัดรอบแกน y)"), (g2, "y", "Mx (ดัดรอบแกน x)")):
+for col, d, ax in ((g1, "y", "Mz"), (g2, "x", "My")):
     c = mine.get(d)
-    col.metric(f"ทิศ {d} → ใช้กับ {ax}", "ไม่มีข้อมูล" if c is None or math.isnan(c.Q_max)
+    col.metric(f"ทิศ {DIRL[d]} → ใช้กับ {ax}", "ไม่มีข้อมูล" if c is None or math.isnan(c.Q_max)
                else f"Q = {c.Q_max:.4f}", c.status if c else "ต้องป้อนข้อมูล", delta_color="off")
 with st.expander("ตาราง Q ทุกชั้น", expanded=not gate_ok):
     show_classes(classes)
@@ -190,21 +206,13 @@ with st.expander("🚧 ออกแบบเสา sway (δs, k > 1, P-Δ) — �
     st.write("ส่วนนี้ยังไม่เปิดใช้ เสาที่อยู่ในชั้นที่เป็น sway จะไม่ผ่านด่านในขั้นที่ 1")
 mode = st.radio("รูปแบบข้อมูลแรง", ["staad", "app"], horizontal=True, key="c_mode",
                 format_func=lambda x: {"staad": "STAAD.Pro member end forces (แนะนำ)",
-                                       "app": "ป้อน Mx / My เอง"}[x])
-axis_ok = True
+                                       "app": "ป้อน Mz / My เอง"}[x])
 if mode == "staad":
     st.caption("วางค่าจากตาราง **Member End Forces** ของ STAAD ตามที่แสดง (แกน local, ไม่ต้องแก้เครื่องหมาย) · "
-               "P = Fx ที่ start node (บวก = อัด) · Mz → Mx (ความลึก YD = h), Fy → Vuy · "
-               "My → My (ความลึก ZD = b), Fz → Vux · โมเมนต์ใช้ขนาด ทิศการดัดตัดสินจาก |V|·L · "
-               "ติ๊ก **แนวดิ่งล้วน** ให้ combo ที่มีแต่ D/L เพื่อตรวจเครื่องหมาย P")
-    c1, c2 = st.columns(2)
-    beta90 = c1.checkbox("เสาตั้ง beta angle = 90° (สลับคู่แกน)", key="c_beta90")
-    flip = c2.checkbox("กลับเครื่องหมาย P (ข้อมูลใช้ ลบ = อัด)", key="c_flip")
-    if abs(b - h) > 1e-6:
-        axis_ok = st.checkbox(f"ยืนยันว่า h = {h:.0f} mm คือ YD (ตาม local y) และ b = {b:.0f} mm คือ ZD "
-                              "ของหน้าตัดใน STAAD", key="c_axisok")
-        if not axis_ok:
-            st.warning("เสาไม่จัตุรัส: ต้องยืนยันการจับคู่ด้านกับแกน STAAD ก่อน (ถ้าสลับด้าน ความจุจะผิด)")
+               "P = Fx ที่ start node (บวก = อัด) · Mz คู่กับ Fy ใช้ความลึก YD · My คู่กับ Fz ใช้ความลึก ZD · "
+               "แรงกับ YD/ZD อยู่ในแกน local เดียวกันจึงจับคู่ตรง ไม่ขึ้นกับ beta · โมเมนต์ใช้ขนาด "
+               "ทิศการดัดตัดสินจาก |F|·L · ติ๊ก **แนวดิ่งล้วน** ให้ combo ที่มีแต่ D/L เพื่อตรวจเครื่องหมาย P")
+    flip = st.checkbox("กลับเครื่องหมาย P (ข้อมูลใช้ ลบ = อัด)", key="c_flip")
     sdefault = pd.DataFrame([
         {"Combo": "S1", "แนวดิ่งล้วน": False, "Fx_s": 1600.0, "Fy_s": -6.0, "Fz_s": 10.0,
          "My_s": -20.0, "Mz_s": 60.0, "My_e": -30.0, "Mz_e": -90.0},
@@ -227,31 +235,31 @@ if mode == "staad":
         if pd.isna(r.get("Fx_s")):
             continue
         f = C.from_staad(val(r["Fx_s"]), val(r["Fy_s"]), val(r["Fz_s"]), val(r["My_s"]),
-                         val(r["Mz_s"]), val(r["My_e"]), val(r["Mz_e"]), beta90, flip)
+                         val(r["Mz_s"]), val(r["My_e"]), val(r["Mz_e"]), flip)
         rows_in.append((str(r.get("Combo") or f"#{i + 1}"), f, bool(r.get("แนวดิ่งล้วน")),
                         "auto", "auto"))
     with st.expander("ตรวจการแปลงค่า STAAD → ค่าที่ใช้คำนวณ", expanded=False):
-        st.dataframe(pd.DataFrame([{"Combo": n, f"Pu ({fu})": f["Pu"], f"Mx บน ({mu})": f["Mxt"],
-                                    f"Mx ล่าง ({mu})": f["Mxb"], f"My บน ({mu})": f["Myt"],
-                                    f"My ล่าง ({mu})": f["Myb"], f"Vuy ({fu})": f["Vuy"],
-                                    f"Vux ({fu})": f["Vux"]} for n, f, *_ in rows_in]),
+        st.dataframe(pd.DataFrame([{"Combo": n, f"Pu ({fu})": f["Pu"], f"|Mz| end ({mu})": f["Mxt"],
+                                    f"|Mz| start ({mu})": f["Mxb"], f"|My| end ({mu})": f["Myt"],
+                                    f"|My| start ({mu})": f["Myb"], f"|Fy| ({fu})": f["Vuy"],
+                                    f"|Fz| ({fu})": f["Vux"]} for n, f, *_ in rows_in]),
                      hide_index=True, width="stretch")
 else:
-    st.caption("แกน x ขนานด้าน b · Mx = โมเมนต์รอบแกน x (ใช้ความลึก h) · Vuy = แรงเฉือนขนานแกน y "
-               "(คู่กับ Mx) · P > 0 = อัด · ทิศการดัด auto = ตัดสินจาก |V|·L")
+    st.caption("ชื่อแกนตาม STAAD · Mz ดัดรอบแกน z (ความลึก YD) คู่กับ Fy · My ดัดรอบแกน y (ความลึก ZD) "
+               "คู่กับ Fz · P > 0 = อัด · ทิศการดัด auto = ตัดสินจาก |F|·L")
     default = pd.DataFrame([
-        {"Combo": "S1", "แนวดิ่งล้วน": False, "Pu": 1600.0, "Mx_top": 90.0, "Mx_bot": 60.0,
-         "My_top": 30.0, "My_bot": 20.0, "Vuy": 6.0, "Vux": 10.0, "โค้ง x": "auto", "โค้ง y": "auto"},
-        {"Combo": "LC2", "แนวดิ่งล้วน": False, "Pu": 900.0, "Mx_top": 40.0, "Mx_bot": -35.0,
-         "My_top": 10.0, "My_bot": 5.0, "Vuy": 15.0, "Vux": 3.0, "โค้ง x": "auto", "โค้ง y": "auto"},
+        {"Combo": "S1", "แนวดิ่งล้วน": False, "Pu": 1600.0, "Mz_top": 90.0, "Mz_bot": 60.0,
+         "My_top": 30.0, "My_bot": 20.0, "Fy": 6.0, "Fz": 10.0, "โค้ง z": "auto", "โค้ง y": "auto"},
+        {"Combo": "LC2", "แนวดิ่งล้วน": False, "Pu": 900.0, "Mz_top": 40.0, "Mz_bot": -35.0,
+         "My_top": 10.0, "My_bot": 5.0, "Fy": 15.0, "Fz": 3.0, "โค้ง z": "auto", "โค้ง y": "auto"},
     ])
     df = st.data_editor(
         default, num_rows="dynamic", width="stretch", key="c_loads",
         column_config={
-            "Pu": num(f"Pu ({fu})"), "Mx_top": num(f"Mx บน ({mu})"), "Mx_bot": num(f"Mx ล่าง ({mu})"),
+            "Pu": num(f"Pu ({fu})"), "Mz_top": num(f"Mz บน ({mu})"), "Mz_bot": num(f"Mz ล่าง ({mu})"),
             "My_top": num(f"My บน ({mu})"), "My_bot": num(f"My ล่าง ({mu})"),
-            "Vuy": num(f"Vuy ({fu})"), "Vux": num(f"Vux ({fu})"),
-            "โค้ง x": st.column_config.SelectboxColumn(options=CURV),
+            "Fy": num(f"Fy ({fu})"), "Fz": num(f"Fz ({fu})"),
+            "โค้ง z": st.column_config.SelectboxColumn(options=CURV),
             "โค้ง y": st.column_config.SelectboxColumn(options=CURV),
             "แนวดิ่งล้วน": st.column_config.CheckboxColumn(help="combo ที่มีแต่ D, L (ใช้ตรวจเครื่องหมาย P)"),
         })
@@ -259,24 +267,23 @@ else:
     for i, r in df.iterrows():
         if pd.isna(r.get("Pu")):
             continue
-        f = {"Pu": val(r["Pu"]), "Mxt": val(r["Mx_top"]), "Mxb": val(r["Mx_bot"]),
-             "Myt": val(r["My_top"]), "Myb": val(r["My_bot"]), "Vuy": val(r["Vuy"]),
-             "Vux": val(r["Vux"])}
+        f = {"Pu": val(r["Pu"]), "Mxt": val(r["Mz_top"]), "Mxb": val(r["Mz_bot"]),
+             "Myt": val(r["My_top"]), "Myb": val(r["My_bot"]), "Vuy": val(r["Fy"]),
+             "Vux": val(r["Fz"])}
         rows_in.append((str(r.get("Combo") or f"#{i + 1}"), f, bool(r.get("แนวดิ่งล้วน")),
-                        r.get("โค้ง x") or "auto", r.get("โค้ง y") or "auto"))
+                        r.get("โค้ง z") or "auto", r.get("โค้ง y") or "auto"))
 
 # ตรวจเครื่องหมาย P จาก combo แนวดิ่งล้วน
 sign_ok, sign_msgs = C.check_axial_sign([(n, f["Pu"], g) for n, f, g, *_ in rows_in])
 for m in sign_msgs:
     (st.warning if sign_ok else st.error)(m)
-ready = gate_ok and sign_ok and axis_ok
+ready = gate_ok and sign_ok
 
 if st.button("ตรวจสอบเสา", type="primary", disabled=not ready,
-             help=None if ready else "ต้องผ่านด่าน sway, ตรวจเครื่องหมาย P และยืนยันแกนก่อน"):
+             help=None if ready else "ต้องผ่านด่าน sway และตรวจเครื่องหมาย P ก่อน"):
     st.session_state.col_go = True
 if not ready:
-    st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อผ่านด่านตรวจ sway (ขั้นที่ 1), เครื่องหมาย P ถูกต้อง "
-            "และยืนยันการจับคู่แกนแล้ว")
+    st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อผ่านด่านตรวจ sway (ขั้นที่ 1) และเครื่องหมาย P ถูกต้อง")
     st.stop()
 if not st.session_state.get("col_go"):
     st.info("กรอกข้อมูลแล้วกด **ตรวจสอบเสา** — ค่าเริ่มต้นคือตัวอย่างเสาชะลูด S1 ในเอกสารของสกิล")
@@ -292,7 +299,8 @@ if not combos:
 try:
     inp = ColumnInput(b, h, fc, fy, fyt, cover, float(db), int(nx), int(ny), float(ds), s,
                       int(legs_x), int(legs_y), cover_to, dagg, grade420, lu_x, lu_y, k_x, k_y, L,
-                      beta, r_method, EI_method, stories, story_name, bypass_reason, omf, cover_min)
+                      beta, r_method, EI_method, stories=stories, story_name=story_name,
+                      sway_bypass=bypass_reason, dir_labels=DIRL, omf=omf, cover_min=cover_min)
     out = run(inp, combos)
 except ValueError as e:
     st.error(f"ข้อมูลไม่ถูกต้อง: {e}")
@@ -331,7 +339,7 @@ t3d, t2d, tres, tq, tsl, tsh, tsum = st.tabs(["3D interaction", "กราฟต
 
 with tq:
     show_classes(out["classes"])
-    st.caption("Mx (ดัดรอบแกน x) ใช้ผลการเซทิศ y · My ใช้ผลการเซทิศ x · combo ที่มีแต่แรงแนวดิ่ง"
+    st.caption(f"Mz ใช้ผลการเซทิศ {DIRL['y']} · My ใช้ผลการเซทิศ {DIRL['x']} · combo ที่มีแต่แรงแนวดิ่ง"
                "ใช้ผลจำแนกของชั้น/ทิศ")
 
 with t3d:
@@ -357,7 +365,7 @@ with t3d:
     fig.add_trace(go.Scatter3d(x=xs, y=ys, z=zs, mode="markers", text=tx, hoverinfo="text",
                                marker=dict(size=5, color=cs), name="จุดโหลด"))
     fig.update_layout(height=620, margin=dict(l=0, r=0, t=10, b=0), scene=dict(
-        xaxis_title=f"φMny ({mu})", yaxis_title=f"φMnx ({mu})", zaxis_title=f"φPn ({fu})"))
+        xaxis_title=f"φMny ({mu})", yaxis_title=f"φMnz ({mu})", zaxis_title=f"φPn ({fu})"))
     st.plotly_chart(fig, width="stretch")
     st.caption("ผิวสีฟ้า = φ-surface (ตัดที่ φPn,max) · จุดดำ = โหลดที่ผ่าน · จุดแดง = เกินความจุ · "
                "ลากเพื่อหมุนกราฟ")
@@ -380,7 +388,7 @@ with t2d:
         fig2.add_trace(go.Scatter(x=[0, fM(my)], y=[0, fM(mx)], mode="lines+markers",
                                   name=f"{lab} ({cap.ratio:.3f})",
                                   marker=dict(size=[0, 10]), line=dict(dash="dot")))
-    fig2.update_layout(height=520, xaxis_title=f"Muy ({mu})", yaxis_title=f"Mux ({mu})",
+    fig2.update_layout(height=520, xaxis_title=f"My ({mu})", yaxis_title=f"Mz ({mu})",
                        yaxis_scaleanchor="x", margin=dict(l=10, r=10, t=30, b=10),
                        title=f"Pu = {fF(rr.combo.Pu):,.1f} {fu}")
     st.plotly_chart(fig2, width="stretch")
@@ -393,7 +401,7 @@ with tres:
             continue
         for lab, mx, my, cap in r.points:
             rows.append({"Combo": r.combo.name, "ตำแหน่ง": lab, f"Pu ({fu})": fF(r.combo.Pu),
-                         f"Mux ({mu})": fM(mx), f"Muy ({mu})": fM(my),
+                         f"Mz ({mu})": fM(mx), f"My ({mu})": fM(my),
                          f"Mres ({mu})": fM(cap.Mres) if cap else None,
                          f"φMcap ({mu})": fM(cap.phiMcap) if cap else None,
                          "φ": cap.pt.phi if cap and cap.pt else None,
@@ -409,7 +417,8 @@ with tsl:
         if r.error:
             continue
         for S in (r.sx, r.sy):
-            rows.append({"Combo": r.combo.name, "แกน": S.axis, "klu/r": S.klu_r,
+            rows.append({"Combo": r.combo.name, "แกน": "Mz" if S.axis == "x" else "My",
+                         "klu/r": S.klu_r,
                          "M1/M2": S.ratio_M1M2, "เกณฑ์": S.limit, "ชะลูด": "ใช่" if S.slender else "-",
                          "δ": S.delta if S.slender else None,
                          f"Mc ({mu})": fM(S.Mc) if S.slender and S.stable else None,
@@ -422,7 +431,8 @@ with tsh:
         if r.error:
             continue
         for sr in (r.shear_y, r.shear_x):
-            rows.append({"Combo": r.combo.name, "ทิศ": sr.direction, f"Vu ({fu})": fF(sr.Vu),
+            rows.append({"Combo": r.combo.name, "แรง": "Fy" if sr.direction == "y" else "Fz",
+                         f"Vu ({fu})": fF(sr.Vu),
                          "สมการ Vc": sr.vc_eq, f"Vc ({fu})": fF(sr.Vc), f"Vs ({fu})": fF(sr.Vs),
                          f"φVn ({fu})": fF(sr.phiVn), "Vu/φVn": sr.ratio,
                          "ต้องมีปลอกรับเฉือน": "ใช่" if sr.min_required else "-",

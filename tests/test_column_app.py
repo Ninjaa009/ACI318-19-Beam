@@ -88,3 +88,32 @@ def test_mismatched_shear_reported_as_combo_error():
     cb = Combo("bad", 1600e3, 90e6, 60e6, 30e6, 20e6, Vux=6e3, Vuy=10e3)   # V สลับแกน
     out = run(s1_input(), [cb])
     assert out["results"][0].error and "จับคู่แกน" in out["results"][0].error
+
+
+def _column_page():
+    from streamlit.testing.v1 import AppTest
+    at = AppTest.from_file("../views/column.py", default_timeout=60)
+    at.run()
+    assert not at.exception
+    return at
+
+
+def test_column_page_uses_staad_names_and_designs():
+    at = _column_page()
+    labels = [n.label for n in at.number_input]
+    assert any(lb.startswith("YD") for lb in labels) and any(lb.startswith("ZD") for lb in labels)
+    assert not any(lb.startswith("b (m)") for lb in labels)
+    btn = next(b for b in at.button if b.label == "ตรวจสอบเสา")
+    btn.click().run()
+    assert not at.exception
+    charts = [p.proto.spec for p in at.get("plotly_chart")]
+    assert charts and any("Mnz" in c for c in charts)
+
+
+def test_beta90_swaps_story_direction_only():
+    at = _column_page()
+    before = [m.label for m in at.metric if m.label.startswith("ทิศ")]
+    at.checkbox(key="c_beta90").check().run()
+    after = [m.label for m in at.metric if m.label.startswith("ทิศ")]
+    assert before == ["ทิศ X → ใช้กับ Mz", "ทิศ Z → ใช้กับ My"]
+    assert after == ["ทิศ Z → ใช้กับ Mz", "ทิศ X → ใช้กับ My"]
