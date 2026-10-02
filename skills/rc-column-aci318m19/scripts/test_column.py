@@ -261,6 +261,32 @@ def run():
     check_true("C10", "bypass เมื่อข้อมูลแสดง sway → ไม่ยอม", (not ok) and "ไม่ได้" in msg[0])
     ok, _ = C.nonsway_gate([], "1", "   ")
     check_true("C10", "เหตุผลว่าง → ไม่ถือว่า bypass", not ok)
+
+    # ---------------- C11 sign convention / นำเข้าจาก STAAD ----------------
+    f = C.from_staad(fx_s=1600, fy_s=-6, fz_s=10, my_s=-20, mz_s=60, my_e=-30, mz_e=-90)
+    check_true("C11", "STAAD: Mz→Mx, Fy→Vuy, My→My, Fz→Vux, P = Fx(start)",
+               (f["Pu"], f["Mxt"], f["Mxb"], f["Vuy"], f["Myt"], f["Myb"], f["Vux"])
+               == (1600, 90, 60, 6, 30, 20, 10))
+    f90 = C.from_staad(1600, -6, 10, -20, 60, -30, -90, beta90=True)
+    check_true("C11", "beta 90° สลับคู่แกน", (f90["Mxt"], f90["Vuy"], f90["Myt"], f90["Vux"])
+               == (30, 10, 90, 6))
+    check_true("C11", "flip_axial กลับเครื่องหมาย P", C.from_staad(1600, 0, 0, 0, 0, 0, 0,
+                                                                     flip_axial=True)["Pu"] == -1600)
+    ok, m = C.check_axial_sign([("1.2D+1.6L", -1500e3, True), ("W", 300e3, False)])
+    check_true("C11", "combo แนวดิ่งได้แรงดึง → หยุด (เครื่องหมาย P กลับด้าน)", (not ok) and "กลับด้าน" in m[0])
+    ok, m = C.check_axial_sign([("1.2D+1.6L", 1500e3, True), ("0.9D+W", -50e3, False)])
+    check_true("C11", "แรงดึงใน combo ลม (ไม่ใช่แนวดิ่ง) → ผ่าน", ok and not m)
+    ok, m = C.check_axial_sign([("W", 1e3, False)])
+    check_true("C11", "ไม่มี combo แนวดิ่ง → ผ่านแต่เตือน", ok and len(m) == 1)
+    # แกนจับคู่ผิด: ใช้ V ของอีกแกน (10 kN) กับ Mx 90/60 (สมดุลต้อง 6 หรือ 30 kN)
+    try:
+        C.curvature_ratio(90e6, 60e6, V=10e3, L=5000)
+        bad = False
+    except ValueError as e:
+        bad = "จับคู่แกน" in str(e)
+    check_true("C11", "V ไม่สอดคล้องกับโมเมนต์ (จับคู่แกนผิด) → แจ้งให้ระบุเอง", bad)
+    r, _ = C.curvature_ratio(90e6, 60e6, V=6.3e3, L=5000)
+    check_true("C11", "คลาดเคลื่อน 5% ยังตัดสินได้ (โค้งทางเดียว)", r < 0)
     return ROWS
 
 

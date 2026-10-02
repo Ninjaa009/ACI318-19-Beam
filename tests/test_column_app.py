@@ -75,3 +75,16 @@ def test_column_calsheet_renders():
     html = build_column_calsheet(ProjectInfo(member="C-S1"), out)
     assert "size: A4 portrait" in html and "RC COLUMN" in html
     assert "1.2935" in html and "<svg" in html           # δ และรูปหน้าตัด/เส้นความจุ
+
+
+def test_staad_import_matches_manual_input():
+    from rcbeam.colcheck import C
+    f = C.from_staad(1600e3, -6e3, 10e3, -20e6, 60e6, -30e6, -90e6)
+    cb = Combo("S1", f["Pu"], f["Mxt"], f["Mxb"], f["Myt"], f["Myb"], Vux=f["Vux"], Vuy=f["Vuy"])
+    assert run(s1_input(), [cb])["gov"].ratio == pytest.approx(0.750, abs=0.002)
+
+
+def test_mismatched_shear_reported_as_combo_error():
+    cb = Combo("bad", 1600e3, 90e6, 60e6, 30e6, 20e6, Vux=6e3, Vuy=10e3)   # V สลับแกน
+    out = run(s1_input(), [cb])
+    assert out["results"][0].error and "จับคู่แกน" in out["results"][0].error

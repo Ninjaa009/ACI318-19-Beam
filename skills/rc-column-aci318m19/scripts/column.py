@@ -477,6 +477,9 @@ def sway_dir_for_axis(axis):
     return "y" if axis == "x" else "x"
 
 
+CURV_TOL = 0.10     # ความคลาดเคลื่อนที่ยอมให้ในการตรวจทิศการดัดด้วย |V|·L
+
+
 def curvature_ratio(M_top, M_bot, V=None, L=None, curvature=None):
     """คืน (M1/M2 ตาม ACI, คำอธิบาย) — ลบ = โค้งทางเดียว, บวก = โค้งสองทาง (§6.2.5.1)
 
@@ -499,6 +502,15 @@ def curvature_ratio(M_top, M_bot, V=None, L=None, curvature=None):
         raise ValueError("ระบุ curvature หรือส่ง V และ L เพื่อตรวจทิศการดัดจากสมดุลแรงเฉือน")
     vd, vs = (a + b) / L, abs(a - b) / L
     double = abs(abs(V) - vd) <= abs(abs(V) - vs)
+    # ต้องตรงกับแบบใดแบบหนึ่งพอสมควร ไม่เช่นนั้นแกนอาจจับคู่ผิด (V ไม่ได้มาจากโมเมนต์แกนเดียวกัน)
+    # หรือมีแรงกระทำระหว่างช่วงเสา → ให้ผู้ใช้ระบุทิศการดัดเอง
+    err = min(abs(abs(V) - vd), abs(abs(V) - vs))
+    if err > CURV_TOL * vd + 1.0:
+        raise ValueError(
+            f"ทิศการดัดตรวจจากแรงเฉือนไม่ได้: |V| = {abs(V) / 1e3:.2f} kN ไม่ตรงทั้ง "
+            f"(|Mt|+|Mb|)/L = {vd / 1e3:.2f} และ ||Mt|−|Mb||/L = {vs / 1e3:.2f} kN "
+            f"(ต่างเกิน {CURV_TOL:.0%}) — ตรวจการจับคู่แกน V↔M หรือแรงกระทำระหว่างช่วง "
+            "แล้วระบุ single/double เอง")
     txt = (f"สมดุลแรงเฉือน: |V| = {abs(V) / 1e3:.2f} kN, (|Mt|+|Mb|)/L = {vd / 1e3:.2f} kN, "
            f"||Mt|−|Mb||/L = {vs / 1e3:.2f} kN → {'โค้งสองทาง' if double else 'โค้งทางเดียว'}")
     return (r if double else -r), txt
@@ -576,6 +588,41 @@ def slenderness(sec, axis, lu, Pu, M_top, M_bot, k=1.0, V=None, L=None, curvatur
     if not S.ok_14:
         S.notes.append("โมเมนต์ลำดับสองเกิน 1.4 เท่าของลำดับหนึ่ง (§6.2.6)")
     return S
+
+
+# ---------------------------------------------------------------- นำเข้าแรงจาก STAAD.Pro
+def from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, beta90=False, flip_axial=False):
+    """แปลง member end forces ของ STAAD (แกน local, ค่าที่ start และ end node) เป็นแรงของสกิล
+
+    การจับคู่ (beta = 0): Mz (ดัดรอบ local z ใช้ความลึก YD) → Mx (ความลึก h), Fy → Vuy;
+                          My (ใช้ความลึก ZD) → My (ความลึก b), Fz → Vux; YD = h, ZD = b
+    beta90=True สลับคู่แกน (เสาหมุน 90°)
+    P = Fx ที่ start node (ใน member end forces ของ STAAD ค่าบวกที่ start = แรงอัด) —
+    flip_axial กลับเครื่องหมายถ้าข้อมูลมาจากแหล่งที่ใช้ convention ต่างกัน
+    โมเมนต์ใช้ขนาด (หน้าตัดเหล็กสมมาตร) ทิศการดัดตัดสินภายหลังจากสมดุลแรงเฉือน
+    คืน dict: Pu, Mxt, Mxb, Myt, Myb, Vuy, Vux (หน่วยเดียวกับที่ป้อน)
+    """
+    Mx_s, Mx_e, Vy = (mz_s, mz_e, fy_s) if not beta90 else (my_s, my_e, fz_s)
+    My_s, My_e, Vx = (my_s, my_e, fz_s) if not beta90 else (mz_s, mz_e, fy_s)
+    return {"Pu": -fx_s if flip_axial else fx_s,
+            "Mxt": abs(Mx_e), "Mxb": abs(Mx_s), "Myt": abs(My_e), "Myb": abs(My_s),
+            "Vuy": abs(Vy), "Vux": abs(Vx)}
+
+
+def check_axial_sign(rows):
+    """ตรวจเครื่องหมายแรงตามแกนจาก combo ที่มีแต่แรงแนวดิ่ง (D, L): ต้องเป็นแรงอัด (Pu > 0)
+
+    rows: list ของ (ชื่อ combo, Pu, เป็น combo แนวดิ่งล้วนหรือไม่)
+    คืน (ผ่านหรือไม่, ข้อความ) — ไม่มี combo แนวดิ่งให้ตรวจ → ผ่านแต่เตือน
+    """
+    grav = [(n, P) for n, P, g in rows if g]
+    if not grav:
+        return True, ["ไม่มี combo แนวดิ่งล้วน (D, L) ให้ตรวจเครื่องหมาย P — ทำเครื่องหมายอย่างน้อย 1 combo"]
+    bad = [n for n, P in grav if P <= 0]
+    if bad:
+        return False, [f"combo แนวดิ่งล้วน {', '.join(map(str, bad))} ได้ P ≤ 0 (แรงดึง) — เครื่องหมาย P "
+                       "น่าจะกลับด้าน (เช่น อ่าน Fx จาก end node แทน start node) ตรวจก่อนออกแบบ"]
+    return True, []
 
 
 # ---------------------------------------------------------------- แรงเฉือน

@@ -188,43 +188,103 @@ else:
 st.header("ขั้นที่ 2 · ออกแบบเสา non-sway")
 with st.expander("🚧 ออกแบบเสา sway (δs, k > 1, P-Δ) — ปิดปรับปรุง"):
     st.write("ส่วนนี้ยังไม่เปิดใช้ เสาที่อยู่ในชั้นที่เป็น sway จะไม่ผ่านด่านในขั้นที่ 1")
-st.caption("แกน x ขนานด้าน b · Mx = โมเมนต์รอบแกน x (ใช้ความลึก h) · Vuy = แรงเฉือนขนานแกน y "
-           "(คู่กับ Mx) · P > 0 = อัด · ทิศการดัด auto = ตัดสินจาก |V|·L")
-default = pd.DataFrame([
-    {"Combo": "S1", "Pu": 1600.0, "Mx_top": 90.0, "Mx_bot": 60.0, "My_top": 30.0, "My_bot": 20.0,
-     "Vuy": 6.0, "Vux": 10.0, "โค้ง x": "auto", "โค้ง y": "auto"},
-    {"Combo": "LC2", "Pu": 900.0, "Mx_top": 40.0, "Mx_bot": -35.0, "My_top": 10.0, "My_bot": 5.0,
-     "Vuy": 15.0, "Vux": 3.0, "โค้ง x": "auto", "โค้ง y": "auto"},
-])
-df = st.data_editor(
-    default, num_rows="dynamic", width="stretch", key="c_loads",
-    column_config={
-        "Pu": num(f"Pu ({fu})"), "Mx_top": num(f"Mx บน ({mu})"), "Mx_bot": num(f"Mx ล่าง ({mu})"),
-        "My_top": num(f"My บน ({mu})"), "My_bot": num(f"My ล่าง ({mu})"),
-        "Vuy": num(f"Vuy ({fu})"), "Vux": num(f"Vux ({fu})"),
-        "โค้ง x": st.column_config.SelectboxColumn(options=CURV),
-        "โค้ง y": st.column_config.SelectboxColumn(options=CURV),
-    })
+mode = st.radio("รูปแบบข้อมูลแรง", ["staad", "app"], horizontal=True, key="c_mode",
+                format_func=lambda x: {"staad": "STAAD.Pro member end forces (แนะนำ)",
+                                       "app": "ป้อน Mx / My เอง"}[x])
+axis_ok = True
+if mode == "staad":
+    st.caption("วางค่าจากตาราง **Member End Forces** ของ STAAD ตามที่แสดง (แกน local, ไม่ต้องแก้เครื่องหมาย) · "
+               "P = Fx ที่ start node (บวก = อัด) · Mz → Mx (ความลึก YD = h), Fy → Vuy · "
+               "My → My (ความลึก ZD = b), Fz → Vux · โมเมนต์ใช้ขนาด ทิศการดัดตัดสินจาก |V|·L · "
+               "ติ๊ก **แนวดิ่งล้วน** ให้ combo ที่มีแต่ D/L เพื่อตรวจเครื่องหมาย P")
+    c1, c2 = st.columns(2)
+    beta90 = c1.checkbox("เสาตั้ง beta angle = 90° (สลับคู่แกน)", key="c_beta90")
+    flip = c2.checkbox("กลับเครื่องหมาย P (ข้อมูลใช้ ลบ = อัด)", key="c_flip")
+    if abs(b - h) > 1e-6:
+        axis_ok = st.checkbox(f"ยืนยันว่า h = {h:.0f} mm คือ YD (ตาม local y) และ b = {b:.0f} mm คือ ZD "
+                              "ของหน้าตัดใน STAAD", key="c_axisok")
+        if not axis_ok:
+            st.warning("เสาไม่จัตุรัส: ต้องยืนยันการจับคู่ด้านกับแกน STAAD ก่อน (ถ้าสลับด้าน ความจุจะผิด)")
+    sdefault = pd.DataFrame([
+        {"Combo": "S1", "แนวดิ่งล้วน": False, "Fx_s": 1600.0, "Fy_s": -6.0, "Fz_s": 10.0,
+         "My_s": -20.0, "Mz_s": 60.0, "My_e": -30.0, "Mz_e": -90.0},
+        {"Combo": "LC2", "แนวดิ่งล้วน": False, "Fx_s": 900.0, "Fy_s": 15.0, "Fz_s": 3.0,
+         "My_s": 5.0, "Mz_s": -35.0, "My_e": 10.0, "Mz_e": 40.0},
+        {"Combo": "1.2D+1.6L", "แนวดิ่งล้วน": True, "Fx_s": 1800.0, "Fy_s": 2.8, "Fz_s": 1.4,
+         "My_s": 3.0, "Mz_s": 8.0, "My_e": 4.0, "Mz_e": 6.0},
+    ])
+    sraw = st.data_editor(
+        sdefault, num_rows="dynamic", width="stretch", key="c_staad",
+        column_config={
+            "Fx_s": num(f"Fx start ({fu})"), "Fy_s": num(f"Fy start ({fu})"),
+            "Fz_s": num(f"Fz start ({fu})"), "My_s": num(f"My start ({mu})"),
+            "Mz_s": num(f"Mz start ({mu})"), "My_e": num(f"My end ({mu})"),
+            "Mz_e": num(f"Mz end ({mu})"),
+            "แนวดิ่งล้วน": st.column_config.CheckboxColumn(help="combo ที่มีแต่ D, L (ใช้ตรวจเครื่องหมาย P)"),
+        })
+    rows_in = []
+    for i, r in sraw.iterrows():
+        if pd.isna(r.get("Fx_s")):
+            continue
+        f = C.from_staad(val(r["Fx_s"]), val(r["Fy_s"]), val(r["Fz_s"]), val(r["My_s"]),
+                         val(r["Mz_s"]), val(r["My_e"]), val(r["Mz_e"]), beta90, flip)
+        rows_in.append((str(r.get("Combo") or f"#{i + 1}"), f, bool(r.get("แนวดิ่งล้วน")),
+                        "auto", "auto"))
+    with st.expander("ตรวจการแปลงค่า STAAD → ค่าที่ใช้คำนวณ", expanded=False):
+        st.dataframe(pd.DataFrame([{"Combo": n, f"Pu ({fu})": f["Pu"], f"Mx บน ({mu})": f["Mxt"],
+                                    f"Mx ล่าง ({mu})": f["Mxb"], f"My บน ({mu})": f["Myt"],
+                                    f"My ล่าง ({mu})": f["Myb"], f"Vuy ({fu})": f["Vuy"],
+                                    f"Vux ({fu})": f["Vux"]} for n, f, *_ in rows_in]),
+                     hide_index=True, width="stretch")
+else:
+    st.caption("แกน x ขนานด้าน b · Mx = โมเมนต์รอบแกน x (ใช้ความลึก h) · Vuy = แรงเฉือนขนานแกน y "
+               "(คู่กับ Mx) · P > 0 = อัด · ทิศการดัด auto = ตัดสินจาก |V|·L")
+    default = pd.DataFrame([
+        {"Combo": "S1", "แนวดิ่งล้วน": False, "Pu": 1600.0, "Mx_top": 90.0, "Mx_bot": 60.0,
+         "My_top": 30.0, "My_bot": 20.0, "Vuy": 6.0, "Vux": 10.0, "โค้ง x": "auto", "โค้ง y": "auto"},
+        {"Combo": "LC2", "แนวดิ่งล้วน": False, "Pu": 900.0, "Mx_top": 40.0, "Mx_bot": -35.0,
+         "My_top": 10.0, "My_bot": 5.0, "Vuy": 15.0, "Vux": 3.0, "โค้ง x": "auto", "โค้ง y": "auto"},
+    ])
+    df = st.data_editor(
+        default, num_rows="dynamic", width="stretch", key="c_loads",
+        column_config={
+            "Pu": num(f"Pu ({fu})"), "Mx_top": num(f"Mx บน ({mu})"), "Mx_bot": num(f"Mx ล่าง ({mu})"),
+            "My_top": num(f"My บน ({mu})"), "My_bot": num(f"My ล่าง ({mu})"),
+            "Vuy": num(f"Vuy ({fu})"), "Vux": num(f"Vux ({fu})"),
+            "โค้ง x": st.column_config.SelectboxColumn(options=CURV),
+            "โค้ง y": st.column_config.SelectboxColumn(options=CURV),
+            "แนวดิ่งล้วน": st.column_config.CheckboxColumn(help="combo ที่มีแต่ D, L (ใช้ตรวจเครื่องหมาย P)"),
+        })
+    rows_in = []
+    for i, r in df.iterrows():
+        if pd.isna(r.get("Pu")):
+            continue
+        f = {"Pu": val(r["Pu"]), "Mxt": val(r["Mx_top"]), "Mxb": val(r["Mx_bot"]),
+             "Myt": val(r["My_top"]), "Myb": val(r["My_bot"]), "Vuy": val(r["Vuy"]),
+             "Vux": val(r["Vux"])}
+        rows_in.append((str(r.get("Combo") or f"#{i + 1}"), f, bool(r.get("แนวดิ่งล้วน")),
+                        r.get("โค้ง x") or "auto", r.get("โค้ง y") or "auto"))
 
-if st.button("ตรวจสอบเสา", type="primary", disabled=not gate_ok,
-             help=None if gate_ok else "ต้องผ่านด่านตรวจ sway ในขั้นที่ 1 ก่อน"):
+# ตรวจเครื่องหมาย P จาก combo แนวดิ่งล้วน
+sign_ok, sign_msgs = C.check_axial_sign([(n, f["Pu"], g) for n, f, g, *_ in rows_in])
+for m in sign_msgs:
+    (st.warning if sign_ok else st.error)(m)
+ready = gate_ok and sign_ok and axis_ok
+
+if st.button("ตรวจสอบเสา", type="primary", disabled=not ready,
+             help=None if ready else "ต้องผ่านด่าน sway, ตรวจเครื่องหมาย P และยืนยันแกนก่อน"):
     st.session_state.col_go = True
-if not gate_ok:
-    st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อชั้นของเสาผ่านด่านตรวจ sway ในขั้นที่ 1")
+if not ready:
+    st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อผ่านด่านตรวจ sway (ขั้นที่ 1), เครื่องหมาย P ถูกต้อง "
+            "และยืนยันการจับคู่แกนแล้ว")
     st.stop()
 if not st.session_state.get("col_go"):
     st.info("กรอกข้อมูลแล้วกด **ตรวจสอบเสา** — ค่าเริ่มต้นคือตัวอย่างเสาชะลูด S1 ในเอกสารของสกิล")
     st.stop()
 
-combos = []
-for i, r in df.iterrows():
-    if pd.isna(r.get("Pu")):
-        continue
-    combos.append(Combo(str(r.get("Combo") or f"#{i + 1}"), val(r["Pu"]) * F,
-                        val(r["Mx_top"]) * M, val(r["Mx_bot"]) * M,
-                        val(r["My_top"]) * M, val(r["My_bot"]) * M,
-                        Vux=val(r["Vux"]) * F, Vuy=val(r["Vuy"]) * F,
-                        curv_x=r.get("โค้ง x") or "auto", curv_y=r.get("โค้ง y") or "auto"))
+combos = [Combo(n, f["Pu"] * F, f["Mxt"] * M, f["Mxb"] * M, f["Myt"] * M, f["Myb"] * M,
+                Vux=f["Vux"] * F, Vuy=f["Vuy"] * F, curv_x=cx, curv_y=cy)
+          for n, f, _g, cx, cy in rows_in]
 if not combos:
     st.error("ยังไม่มี load combination")
     st.stop()
