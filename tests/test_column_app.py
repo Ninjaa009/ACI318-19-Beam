@@ -138,3 +138,33 @@ def test_paste_staad_table_with_mixed_units():
     assert df.iloc[0, 2] == pytest.approx(20.958)
     next(b for b in at.button if b.label == "ตรวจสอบเสา").click().run()
     assert not at.exception and not at.error
+
+
+B11 = """11\t102\t23\t-11322.017\t 129.377\t 1229.435\t-0.006\t 28.560\t-2.917
+11\t103\t23\t-8636.348\t 98.719\t 923.937\t-0.004\t 21.463\t-2.226
+11\t101\t23\t-8736.487\t 100.007\t 871.026\t-0.004\t 20.234\t-2.255
+11\t102\t11\t 13377.765\t-129.377\t-1229.435\t 0.006\t 13.638\t-1.524
+11\t2\t23\t-3518.265\t 40.065\t 443.124\t-0.003\t 10.294\t-0.903
+11\t103\t11\t 10349.472\t-98.719\t-923.937\t 0.004\t 10.249\t-1.163
+11\t101\t11\t 11134.860\t-100.007\t-871.026\t 0.004\t 9.663\t-1.178
+11\t3\t23\t-2395.999\t 27.285\t 301.775\t-0.002\t 7.010\t-0.615
+11\t2\t11\t 3518.265\t-40.065\t-443.124\t 0.003\t 4.916\t-0.472
+11\t1\t23\t-2722.084\t 31.369\t 179.037\t 0.000\t 4.159\t-0.708
+11\t3\t11\t 2395.999\t-27.285\t-301.775\t 0.002\t 3.348\t-0.321
+11\t1\t11\t 4435.207\t-31.369\t-179.037\t-0.000\t 1.986\t-0.369"""
+
+
+def test_paste_without_header_guesses_units_from_statics():
+    at = _column_page()
+    at.number_input(key="c_L").set_value(3.5).run()
+    at.text_area(key="c_staad_txt").set_value(B11).run()
+    assert at.selectbox(key="c_sfu_kg").value == "kg" and at.selectbox(key="c_smu_kN-m").value == "kN-m"
+    df = at.dataframe[-1].value
+    assert len(df) == 6 and df.iloc[0, 1] == pytest.approx(13377.765 * 9.80665e-3, rel=1e-6)
+
+
+def test_paste_without_header_and_wrong_length_requires_units():
+    at = _column_page()
+    at.text_area(key="c_staad_txt").set_value(B11).run()          # L = 5 m ไม่ตรงโมเดล
+    assert at.selectbox(key="c_sfu_None").value is None
+    assert next(b for b in at.button if b.label == "ตรวจสอบเสา").disabled

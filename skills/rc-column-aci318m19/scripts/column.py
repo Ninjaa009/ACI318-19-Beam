@@ -714,6 +714,36 @@ def pair_staad_rows(rows, start_node, flip_axial=False):
     return out, errs
 
 
+# คู่หน่วยที่ STAAD ใช้บ่อย (แรง, โมเมนต์) — ใช้เดาหน่วยเมื่อคัดลอกมาไม่มีหัวตาราง
+STAAD_UNIT_PAIRS = [("kN", "kN-m"), ("kg", "kN-m"), ("kg", "kg-m"), ("ton", "ton-m"), ("ton", "kN-m"),
+                    ("kN", "kg-m"), ("N", "N-m"), ("N", "N-mm"), ("N", "kN-m")]
+
+
+def staad_units_from_statics(pairs, L):
+    """หาคู่หน่วย (แรง, โมเมนต์) ที่ทำให้สมดุลของเสาเป็นจริงทุก L/C: |F|·L ≈ |Mt| ± |Mb|
+
+    pairs: ผลจาก pair_staad_rows (ค่าดิบตามตาราง), L: ความยาวชิ้นส่วน (mm)
+    สมดุลบอกได้แค่ "อัตราส่วน" หน่วยแรงต่อหน่วยโมเมนต์ (เช่น kg กับ kN-m ไม่เข้ากันกับ kN กับ kN-m)
+    แต่แยก kN/kN-m กับ kg/kg-m ไม่ได้ → ถ้าได้หลายคู่ ผู้ใช้ต้องเลือกเอง
+    คืน list ของคู่หน่วยที่ผ่าน (ว่าง = ไม่มีคู่ไหนผ่าน: ตรวจ L หรือมีแรงกระทำกลางเสา)
+    """
+    ok = []
+    for fu, mu in STAAD_UNIT_PAIRS:
+        kf, km = STAAD_FORCE_UNITS[fu], STAAD_MOMENT_UNITS[mu]
+        n = 0
+        try:
+            for _, f in pairs:
+                for Mt, Mb, V in ((f["Mxt"], f["Mxb"], f["Vuy"]), (f["Myt"], f["Myb"], f["Vux"])):
+                    if max(Mt, Mb) * km > 1e5:          # ข้ามแกนที่โมเมนต์เล็กมาก (< 0.1 kN·m)
+                        curvature_ratio(Mt * km, Mb * km, V=V * kf, L=L)
+                        n += 1
+        except ValueError:
+            continue
+        if n:
+            ok.append((fu, mu))
+    return ok
+
+
 def check_axial_sign(rows):
     """ตรวจเครื่องหมายแรงตามแกนจาก combo ที่มีแต่แรงแนวดิ่ง (D, L): ต้องเป็นแรงอัด (Pu > 0)
 

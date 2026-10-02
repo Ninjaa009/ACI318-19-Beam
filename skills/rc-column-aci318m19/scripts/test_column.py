@@ -312,6 +312,13 @@ def run():
     rows2, _, _ = C.parse_staad_end_forces("12 101 24 -4601.253 -686.815 580.044 0.005 13.475 16.155")
     _, errs = C.pair_staad_rows(rows2, "12")
     check_true("C12", "L/C ที่มีแถวเดียว → แจ้งผิดพลาด", len(errs) == 1)
+    check_true("C12", "ไม่มีหัวตาราง: เดาหน่วยจากสมดุล → kg + kN-m (L = 3.5 m)",
+               C.staad_units_from_statics(pairs, 3500) == [("kg", "kN-m")])
+    check_true("C12", "L ผิด (5 m) → ไม่มีคู่หน่วยที่เข้ากัน", C.staad_units_from_statics(pairs, 5000) == [])
+    r1, _, _ = C.parse_staad_end_forces("1 101 1 1600 -6 10 0 -20 60\n1 101 2 -1600 6 -10 0 -30 -90")
+    check_true("C12", "kN/kN-m แยกจาก kg/kg-m ด้วยสมดุลไม่ได้ → ให้ผู้ใช้เลือก",
+               ("kN", "kN-m") in C.staad_units_from_statics(C.pair_staad_rows(r1, "1")[0], 5000)
+               and len(C.staad_units_from_statics(C.pair_staad_rows(r1, "1")[0], 5000)) > 1)
     rows3, _, _ = C.parse_staad_end_forces("5   101 1.2D+1.6L   3   100   1   2   0   3   4")
     check_true("C12", "L/C มีชื่อต่อท้าย", rows3 and rows3[0]["lc"] == "101 1.2D+1.6L" and rows3[0]["node"] == "3")
     return ROWS
