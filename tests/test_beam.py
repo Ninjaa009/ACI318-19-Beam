@@ -132,4 +132,6 @@ def test_calsheet_a4_html():
                           DesignInfo(D.kind, D.As_req, D.Asc_req, D.notes))
     assert "size: A4 portrait" in html
     assert "&lt;b&gt;x&lt;/b&gt;" in html and "<b>x</b>" not in html
-    assert "<svg" in html and "346.95 kN·m" in html
+    assert "<svg" in html and "346.95" in html          # φMn อยู่ใน alt ของสมการ
+    assert 'font-family: "THSarabunPSK"' in html          # ฝังฟอนต์ในไฟล์
+    assert "data:image/svg+xml;base64" in html            # สมการ LaTeX

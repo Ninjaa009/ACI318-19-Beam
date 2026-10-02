@@ -28,6 +28,11 @@ streamlit run app.py
 
 ดูตัวอย่างก่อนพิมพ์ได้ในแอปที่หัวข้อ "ดูตัวอย่าง Calsheet A4"
 
+รูปแบบเป็นรายงานแบบ ETABS / LaTeX ดังนี้
+- ข้อความไทยใช้ฟอนต์ **TH SarabunPSK** ซึ่งฝังอยู่ในไฟล์ จึงพิมพ์ได้แม้เครื่องไม่ได้ติดตั้งฟอนต์ (ไฟล์ฟอนต์อยู่ที่ `rcbeam/fonts/` พร้อมสัญญาอนุญาต)
+- สมการแสดงแบบ LaTeX (Computer Modern) มีเลขสมการ และอ้างอิงข้อ ACI กำกับไว้ทางซ้าย
+- ตารางแบบ booktabs
+
 เนื้อหา Calsheet มีดังนี้
 - หัวกระดาษที่ซ้ำทุกหน้า
 - ข้อมูลออกแบบพร้อมรูปหน้าตัด
@@ -46,6 +51,8 @@ streamlit run app.py
 | `rcbeam/shear.py` | แรงเฉือน: Vc สมการ (a)/(b)/(c), Av,min, ออกแบบ/ตรวจปลอก |
 | `rcbeam/report.py` | ตารางสถานะและรายงาน Markdown |
 | `rcbeam/calsheet.py` | Calsheet A4 (HTML สำหรับพิมพ์ / Save as PDF) |
+| `rcbeam/texmath.py` | เรนเดอร์สมการ LaTeX เป็น SVG (matplotlib mathtext) |
+| `rcbeam/fonts/` | ฟอนต์ TH SarabunPSK + สัญญาอนุญาต |
 | `rcbeam/units.py` | แปลงหน่วย kgf–m ↔ MPa–mm–N |
 | `tests/test_beam.py` | เคสทดสอบ T1–T3, E1–E5 (ด้านล่าง) |
 
