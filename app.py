@@ -7,7 +7,10 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle, Circle
+import datetime
+
 import streamlit as st
+import streamlit.components.v1 as components
 
 from rcbeam import units as u
 from rcbeam.flexure import (
@@ -15,6 +18,7 @@ from rcbeam.flexure import (
     bars_per_layer,
 )
 from rcbeam.shear import check_stirrups, design_stirrups
+from rcbeam.calsheet import ProjectInfo, DesignInfo, build_calsheet
 from rcbeam.report import (
     Inputs, build_report, detailing_checks, flexure_steps, shear_steps,
     SUPPORT_DIVISOR, PASS, FAIL, kgfm, kgf, cm2,
@@ -67,6 +71,17 @@ with st.sidebar:
     span = u.m_to_mm(st.number_input("ช่วงคาน ℓ (m), 0 = ไม่ตรวจ", 0.0, 30.0, 0.0, 0.5))
     support = st.selectbox("สภาพรองรับ", list(SUPPORT_DIVISOR))
 
+    with st.expander("ข้อมูลโครงการ (หัว Calsheet)"):
+        proj = ProjectInfo(
+            project=st.text_input("โครงการ", ""),
+            location=st.text_input("สถานที่", ""),
+            member=st.text_input("ชื่อคาน", "B1"),
+            grid=st.text_input("ตำแหน่ง / Grid", ""),
+            designer=st.text_input("ผู้คำนวณ", ""),
+            checker=st.text_input("ผู้ตรวจสอบ", ""),
+            date=st.date_input("วันที่", datetime.date.today()).strftime("%d/%m/%Y"),
+        )
+
 ety = eps_ty(fy, grade420)
 
 
@@ -102,7 +117,8 @@ def draw_section(inp, fr):
     return fig
 
 
-def show(title, inp, fr, sr, counts, db, header):
+def show(title, inp, fr, sr, counts, db, header, steel_text, stirrup_text,
+         design=None, key="d"):
     det = detailing_checks(inp, fr, counts, db)
     md, rows = build_report(title, inp, fr, sr, det, header)
     all_ok = all(r[2] == PASS for r in rows if r[2] in (PASS, FAIL))
@@ -130,8 +146,17 @@ def show(title, inp, fr, sr, counts, db, header):
         st.markdown(flexure_steps(inp, fr))
     with st.expander("รายการคำนวณแรงเฉือน", expanded=False):
         st.markdown(shear_steps(inp, sr))
-    st.download_button("ดาวน์โหลดรายงาน (.md)", md, file_name="beam_report.md",
-                       mime="text/markdown")
+    sheet = build_calsheet(title, proj, inp, fr, sr, rows, steel_text, stirrup_text,
+                           design)
+    fname = f"calsheet_{proj.member or 'beam'}".replace(" ", "_")
+    d1, d2 = st.columns(2)
+    d1.download_button("🖨️ ดาวน์โหลด Calsheet A4 (.html)", sheet,
+                       file_name=f"{fname}.html", mime="text/html", type="primary", key=f"{key}_cs",
+                       help="เปิดไฟล์ในเบราว์เซอร์ แล้วกดปุ่มพิมพ์ หรือ Ctrl+P → Save as PDF")
+    d2.download_button("ดาวน์โหลดรายงาน (.md)", md, file_name=f"{fname}.md",
+                       mime="text/markdown", key=f"{key}_md")
+    with st.expander("ดูตัวอย่าง Calsheet A4"):
+        components.html(sheet, height=900, scrolling=True)
 
 
 tab_design, tab_check = st.tabs(["ออกแบบ", "ตรวจสอบ"])
@@ -145,6 +170,8 @@ with tab_design:
     db = c3.selectbox("เหล็กหลัก DB (mm)", BARS, index=3, key="d_db")
     db_c = c4.selectbox("เหล็กอัด DB (mm)", BARS, index=2, key="d_dbc")
     if st.button("ออกแบบ", type="primary"):
+        st.session_state.design_go = True
+    if st.session_state.get("design_go"):
         inp = make_inputs(Mu, Vu)
         D = design_flexure(b, h, fc, fy, inp.Mu, cover, ds, db, db_c, dagg, ety)
         fr = D.result
@@ -167,7 +194,9 @@ with tab_design:
                   (f", A′s,req = {cm2(D.Asc_req)} (ค่าประมาณที่ c = cmax)"
                    if D.kind != "singly" else "")]
         header += [f"- {n}" for n in D.notes]
-        show("รายการคำนวณออกแบบคาน", inp, fr, sr, D.counts, db, header)
+        show("รายการคำนวณออกแบบคาน", inp, fr, sr, D.counts, db, header,
+             f"{kind}: {steel}", stir,
+             DesignInfo(D.kind, D.As_req, D.Asc_req, D.notes))
 
 with tab_check:
     c1, c2 = st.columns(2)
@@ -182,6 +211,8 @@ with tab_check:
     db_cc = c4.selectbox("DB เหล็กอัด", BARS, index=2, key="c_dbc")
     s = c5.number_input("ระยะปลอก s (mm), 0 = ไม่มี", 0.0, 600.0, 200.0, 25.0)
     if st.button("ตรวจสอบ", type="primary"):
+        st.session_state.check_go = True
+    if st.session_state.get("check_go"):
         try:
             counts = [int(x) for x in counts_txt.replace(" ", "").split(",") if x]
             if not counts or min(counts) <= 0:
@@ -199,7 +230,14 @@ with tab_check:
         fr = analyze(b, h, fc, fy, layers, ety)
         sr = check_stirrups(inp.Vu, fc, fyt, b, fr.d, fr.As, ds, int(legs), s,
                             exempt_9631=exempt, vc_simple=vc_simple)
-        show("รายการตรวจสอบคาน", inp, fr, sr, counts, db_t, [])
+        side_t, side_c = ("ล่าง", "บน") if inp.Mu >= 0 else ("บน", "ล่าง")
+        steel = (f"เหล็กดึง ({side_t}) {' + '.join(str(n) for n in counts)}-DB{db_t} "
+                 f"({cm2(fr.As)})")
+        if n_c > 0:
+            steel += f" · เหล็กอัด ({side_c}) {n_c}-DB{db_cc} ({cm2(fr.As_comp)})"
+        stir = (f"ปลอก {int(legs)} ขา Ø{ds} @ {s:.0f} mm" if s > 0 else "ไม่มีปลอก")
+        show("รายการตรวจสอบคาน", inp, fr, sr, counts, db_t, [], f"ตรวจสอบ: {steel}",
+             stir, key="c")
 
 st.divider()
 st.caption("ผลลัพธ์ใช้ประกอบแผ่นคำนวณเท่านั้น ต้องมีวิศวกรผู้รับผิดชอบตรวจสอบและลงนาม · "

@@ -116,3 +116,20 @@ def test_kgfm_matches_si():
 def test_grade420_exception_only_for_420():
     with pytest.raises(ValueError):
         eps_ty(400.0, True)
+
+
+def test_calsheet_a4_html():
+    from rcbeam.report import Inputs, detailing_checks, summary_rows
+    from rcbeam.calsheet import ProjectInfo, DesignInfo, build_calsheet
+    D = design_flexure(300, 450, FC, FY, -330e6, 40, 10, 25, 20)
+    fr = D.result
+    sr = design_stirrups(150e3, FC, FY, 300, fr.d, fr.As, 10, 2)
+    inp = Inputs(b=300, h=450, fc=FC, fy=FY, fyt=FY, cover=40, ds=10, legs=2,
+                 dagg=20, Mu=-330e6, Vu=150e3)
+    rows = summary_rows(inp, fr, sr, detailing_checks(inp, fr, D.counts, 25))
+    html = build_calsheet("T2", ProjectInfo(project="<b>x</b>", member="B1"), inp, fr,
+                          sr, rows, "steel", "stirrup",
+                          DesignInfo(D.kind, D.As_req, D.Asc_req, D.notes))
+    assert "size: A4 portrait" in html
+    assert "&lt;b&gt;x&lt;/b&gt;" in html and "<b>x</b>" not in html
+    assert "<svg" in html and "346.95 kN·m" in html
