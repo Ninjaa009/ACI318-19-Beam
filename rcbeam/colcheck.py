@@ -43,6 +43,7 @@ class ColumnInput:
     EI_method: str = "a"
     stories: list = None         # แถวข้อมูลชั้นสำหรับ classify_stories (ทุกชั้น ทุกทิศ ทุก combo)
     story_name: str = ""         # ชั้นที่เสาต้นนี้อยู่
+    sway_bypass: str = ""        # เหตุผลที่วิศวกรยืนยัน non-sway เอง (ว่าง = ไม่ข้าม)
     omf: bool = False            # §18.3.3 (OMF ใน SDC B)
     cover_min: float = 40.0
 
@@ -137,7 +138,9 @@ def run(inp, combos):
     out["Q"] = sorted(mine, key=lambda c: c.direction)         # ของชั้นที่เสาอยู่
     out["sway"] = any(c.status == "sway" for c in mine)
     # ด่านบังคับ: ต้องเป็น non-sway ครบทั้งสองทิศก่อนออกแบบ (sway ปิดปรับปรุง)
-    out["gate_ok"], out["gate_msgs"] = C.nonsway_gate(out["classes"], inp.story_name)
+    out["gate_ok"], out["gate_msgs"] = C.nonsway_gate(out["classes"], inp.story_name,
+                                                      inp.sway_bypass)
+    out["bypass"] = out["gate_ok"] and bool(out["gate_msgs"])
     out["results"] = [check_combo(inp, sec, cb) for cb in combos] if out["gate_ok"] else []
     good = [r for r in out["results"] if not r.error]
     out["gov"] = max(good, key=lambda r: r.ratio) if good else None
@@ -164,7 +167,8 @@ def summary(out):
                    (f", Q/0.35 = {c.Q_upper:.4f}" if c.Q_upper is not None else ""))
             rows.append((f"Sway ชั้น {c.story} ทิศ {c.direction.upper()}", val, st, "6.6.4.3"))
     for m in out.get("gate_msgs", []):
-        rows.append(("ด่านตรวจ sway ก่อนออกแบบ", m, FAIL, "6.6.4.3"))
+        rows.append(("ด่านตรวจ sway ก่อนออกแบบ", m,
+                     C.BYPASS_LABEL if out.get("bypass") else FAIL, "6.6.4.3"))
     res = [r for r in out.get("results", []) if not r.error]
     for r in out.get("results", []):
         if r.error:

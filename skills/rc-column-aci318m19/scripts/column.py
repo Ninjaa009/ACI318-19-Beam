@@ -435,13 +435,28 @@ def classify_stories(rows):
 SWAY_CLOSED = "การออกแบบเสาในโครง sway ปิดปรับปรุง (ยังไม่รองรับ δs)"
 
 
-def nonsway_gate(classes, story):
+BYPASS_LABEL = "ผู้ใช้ยืนยัน"
+
+
+def nonsway_gate(classes, story, bypass_reason=""):
     """ด่านบังคับก่อนออกแบบ: ชั้นของเสาต้องมีผลจำแนกครบทั้งทิศ x และ y และเป็น non-sway ทั้งคู่
 
     คืน (ผ่านหรือไม่, รายการข้อความ) — ไม่ผ่านเมื่อ: ไม่มีข้อมูลชั้น/ทิศ, ไม่มี combo ที่มีแรงด้านข้าง,
     "ต้องยืนยัน" (โมเดลยังไม่ลด stiffness และ Q/0.35 > 0.05) หรือ sway (ปิดปรับปรุง)
+
+    bypass_reason: วิศวกรยืนยันเองว่าเป็น non-sway (เช่น มีผนังรับแรงเฉือน/โครงค้ำยัน) ต้องมีเหตุผล
+    — ข้ามได้เฉพาะกรณีไม่มีข้อมูลหรือ "ต้องยืนยัน" **ข้ามไม่ได้เมื่อข้อมูลที่ป้อนแสดงว่า sway**
+    (ออกแบบแบบ non-sway จะได้โมเมนต์ต่ำกว่าจริง) ข้อความแรกขึ้นต้นด้วย BYPASS_LABEL เมื่อข้าม
     """
     mine = {c.direction: c for c in classes if c.story == str(story)}
+    reason = (bypass_reason or "").strip()
+    if reason:
+        sway = [d for d, c in mine.items() if c.status == "sway"]
+        if sway:
+            return False, [f"ข้ามการตรวจ sway ไม่ได้: ข้อมูลชั้น {story} ทิศ {', '.join(sway)} "
+                           f"แสดงว่าเป็น sway (Q > 0.05) — {SWAY_CLOSED}"]
+        return True, [f"{BYPASS_LABEL}: ข้ามการตรวจ sway ชั้น {story} โดยวิศวกรยืนยันว่าเป็น "
+                      f"non-sway — เหตุผล: {reason}"]
     msgs = []
     for d in ("x", "y"):
         c = mine.get(d)

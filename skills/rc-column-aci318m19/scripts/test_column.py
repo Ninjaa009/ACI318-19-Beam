@@ -252,6 +252,15 @@ def run():
                else r for r in rows]
     ok, msg = C.nonsway_gate(C.classify_stories(cf_rows), "-1.5–0")
     check_true("C10", "ต้องยืนยัน → ไม่ผ่านด่าน", (not ok) and "ต้องยืนยัน" in msg[0])
+    ok, msg = C.nonsway_gate(C.classify_stories(cf_rows), "-1.5–0", "มีผนังรับแรงเฉือนสองทิศ")
+    check_true("C10", "bypass + เหตุผล (กรณีต้องยืนยัน) → ผ่าน และบันทึกเหตุผล",
+               ok and msg[0].startswith(C.BYPASS_LABEL) and "ผนัง" in msg[0])
+    ok, msg = C.nonsway_gate([], "1", "โครงค้ำยัน")
+    check_true("C10", "bypass เมื่อไม่มีข้อมูลชั้น → ผ่าน", ok)
+    ok, msg = C.nonsway_gate(C.classify_stories(sw_rows), "-1.5–0", "ผู้ใช้ยืนยัน")
+    check_true("C10", "bypass เมื่อข้อมูลแสดง sway → ไม่ยอม", (not ok) and "ไม่ได้" in msg[0])
+    ok, _ = C.nonsway_gate([], "1", "   ")
+    check_true("C10", "เหตุผลว่าง → ไม่ถือว่า bypass", not ok)
     return ROWS
 
 

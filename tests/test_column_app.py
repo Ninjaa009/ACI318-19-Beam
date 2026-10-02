@@ -40,6 +40,21 @@ def test_design_blocked_without_sway_check():
     assert not out["gate_ok"] and "ทิศ y" in out["gate_msgs"][0]
 
 
+def test_bypass_with_reason_allows_design_and_is_reported():
+    out = run(s1_input(stories=[], sway_bypass="มีผนังรับแรงเฉือนครบสองทิศ"), [S1])
+    assert out["gate_ok"] and out["bypass"] and out["results"]
+    row = [r for r in out["summary"] if r[0] == "ด่านตรวจ sway ก่อนออกแบบ"][0]
+    assert row[2] == "ผู้ใช้ยืนยัน" and "ผนัง" in row[1]
+    html = build_column_calsheet(ProjectInfo(member="C1"), out)
+    assert "ผนังรับแรงเฉือนครบสองทิศ" in html
+
+
+def test_bypass_refused_when_data_shows_sway():
+    stories = [dict(STORY[0], delta_o=40.0), STORY[1]]
+    out = run(s1_input(stories=stories, sway_bypass="ยืนยัน"), [S1])
+    assert not out["gate_ok"] and out["results"] == []
+
+
 def test_other_story_does_not_affect_column():
     stories = STORY + [dict(STORY[0], story="2", delta_o=40.0)]
     out = run(s1_input(stories=stories), [S1])

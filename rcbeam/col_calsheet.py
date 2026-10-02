@@ -282,6 +282,10 @@ def build_column_calsheet(proj, out):
     D.raw(f'<table class="grid num full"><thead><tr>{hdr}</tr></thead><tbody>{rows}</tbody></table>')
 
     D.h("การจำแนกโครง sway / non-sway", "Stability Index")
+    if out.get("bypass"):
+        D.raw(f'<div class="result"><b>ข้ามการตรวจ sway — วิศวกรยืนยันว่าเป็นโครง non-sway</b><br>'
+              f'{_e(out["gate_msgs"][0])}<br><i>ผลการออกแบบใช้ได้เฉพาะเมื่อโครงเป็น non-sway จริง '
+              "วิศวกรผู้รับผิดชอบต้องแนบหลักฐานประกอบ</i></div>")
     if out["classes"]:
         D.p("ตรวจทุกชั้นทุกทิศ ใช้ Q สูงสุดจากทุก combination ที่มีแรงด้านข้าง; Δ<sub>o</sub> จากการวิเคราะห์"
             "ลำดับหนึ่งของโมเดลที่ลด stiffness (คาน 0.35I<sub>g</sub>, เสา 0.70I<sub>g</sub>, ACI 6.6.3.1.1)")

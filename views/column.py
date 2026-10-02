@@ -151,8 +151,19 @@ for _, r in sdf.iterrows():
 story_names = list(dict.fromkeys(st_["story"] for st_ in stories))
 story_name = st.selectbox("เสาต้นนี้อยู่ชั้น", story_names or ["(ไม่มีข้อมูลชั้น)"], key="c_mystory")
 
+bypass = st.checkbox("ข้ามการตรวจ sway — วิศวกรยืนยันเองว่าเป็น non-sway", value=False, key="c_bypass",
+                     help="ใช้เมื่อไม่มีข้อมูล Q หรือผลยัง 'ต้องยืนยัน' เช่น โครงมีผนังรับแรงเฉือน/โครงค้ำยัน "
+                          "ครบทั้งสองทิศ — ข้ามไม่ได้ถ้าข้อมูลที่ป้อนแสดงว่า sway")
+bypass_reason = ""
+if bypass:
+    bypass_reason = st.text_input("เหตุผล (จำเป็น — พิมพ์ลงใน Calsheet)", key="c_bypass_why",
+                                  placeholder="เช่น มีผนังรับแรงเฉือนครบทั้งสองทิศ ตรวจ Q จากโมเดลแยกแล้ว")
+    if not bypass_reason.strip():
+        st.warning("ต้องใส่เหตุผลก่อนจึงจะข้ามการตรวจ sway ได้")
+
 classes = C.classify_stories(stories)
-gate_ok, gate_msgs = C.nonsway_gate(classes, story_name)
+gate_ok, gate_msgs = C.nonsway_gate(classes, story_name, bypass_reason)
+bypassed = gate_ok and bool(gate_msgs)
 mine = {c.direction: c for c in classes if c.story == str(story_name)}
 g1, g2 = st.columns(2)
 for col, d, ax in ((g1, "x", "My (ดัดรอบแกน y)"), (g2, "y", "Mx (ดัดรอบแกน x)")):
@@ -161,7 +172,10 @@ for col, d, ax in ((g1, "x", "My (ดัดรอบแกน y)"), (g2, "y", "M
                else f"Q = {c.Q_max:.4f}", c.status if c else "ต้องป้อนข้อมูล", delta_color="off")
 with st.expander("ตาราง Q ทุกชั้น", expanded=not gate_ok):
     show_classes(classes)
-if gate_ok:
+if bypassed:
+    st.warning(f"⚠️ {gate_msgs[0]} — ออกแบบต่อได้ ผลการออกแบบถูกต้องเฉพาะเมื่อโครงเป็น non-sway จริง "
+               "(สถานะ \"ผู้ใช้ยืนยัน\" จะแสดงในตารางสรุปและ Calsheet)")
+elif gate_ok:
     st.success(f"ผ่านด่าน: ชั้น {story_name} เป็น **non-sway ทั้งสองทิศ** → ออกแบบเสาในขั้นที่ 2 ได้")
 else:
     for m in gate_msgs:
@@ -218,7 +232,7 @@ if not combos:
 try:
     inp = ColumnInput(b, h, fc, fy, fyt, cover, float(db), int(nx), int(ny), float(ds), s,
                       int(legs_x), int(legs_y), cover_to, dagg, grade420, lu_x, lu_y, k_x, k_y, L,
-                      beta, r_method, EI_method, stories, story_name, omf, cover_min)
+                      beta, r_method, EI_method, stories, story_name, bypass_reason, omf, cover_min)
     out = run(inp, combos)
 except ValueError as e:
     st.error(f"ข้อมูลไม่ถูกต้อง: {e}")
