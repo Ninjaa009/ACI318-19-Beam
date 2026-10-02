@@ -432,6 +432,31 @@ def classify_stories(rows):
     return out
 
 
+SWAY_CLOSED = "การออกแบบเสาในโครง sway ปิดปรับปรุง (ยังไม่รองรับ δs)"
+
+
+def nonsway_gate(classes, story):
+    """ด่านบังคับก่อนออกแบบ: ชั้นของเสาต้องมีผลจำแนกครบทั้งทิศ x และ y และเป็น non-sway ทั้งคู่
+
+    คืน (ผ่านหรือไม่, รายการข้อความ) — ไม่ผ่านเมื่อ: ไม่มีข้อมูลชั้น/ทิศ, ไม่มี combo ที่มีแรงด้านข้าง,
+    "ต้องยืนยัน" (โมเดลยังไม่ลด stiffness และ Q/0.35 > 0.05) หรือ sway (ปิดปรับปรุง)
+    """
+    mine = {c.direction: c for c in classes if c.story == str(story)}
+    msgs = []
+    for d in ("x", "y"):
+        c = mine.get(d)
+        if c is None:
+            msgs.append(f"ชั้น {story} ไม่มีข้อมูลทิศ {d} — ต้องตรวจ sway ทั้งสองทิศก่อนออกแบบ")
+        elif c.status == "sway":
+            msgs.append(f"ชั้น {story} ทิศ {d}: Q = {c.Q_max:.4f} > 0.05 → sway — {SWAY_CLOSED}")
+        elif c.status == "ต้องยืนยัน":
+            msgs.append(f"ชั้น {story} ทิศ {d}: ต้องยืนยัน — Q/0.35 = {c.Q_upper:.4f} > 0.05 "
+                        "รันโมเดลที่ลด stiffness แล้วป้อน Δo ใหม่")
+        elif c.status != "non-sway":
+            msgs.append(f"ชั้น {story} ทิศ {d}: {c.status} — {'; '.join(c.notes)}")
+    return not msgs, msgs
+
+
 def sway_dir_for_axis(axis):
     """เสาดัดรอบแกน x (Mx) เกิดจากการเซในทิศ y และกลับกัน"""
     return "y" if axis == "x" else "x"

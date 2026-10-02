@@ -33,6 +33,13 @@ def test_sway_stops_checks():
     assert out["sway"] and out["results"] == []
 
 
+def test_design_blocked_without_sway_check():
+    out = run(s1_input(stories=[]), [S1])
+    assert not out["gate_ok"] and out["results"] == [] and len(out["gate_msgs"]) == 2
+    out = run(s1_input(stories=STORY[:1]), [S1])          # มีแต่ทิศ x
+    assert not out["gate_ok"] and "ทิศ y" in out["gate_msgs"][0]
+
+
 def test_other_story_does_not_affect_column():
     stories = STORY + [dict(STORY[0], story="2", delta_o=40.0)]
     out = run(s1_input(stories=stories), [S1])
@@ -41,7 +48,7 @@ def test_other_story_does_not_affect_column():
 
 def test_rcdc_column_with_rb9_ties_fails_tie_size():
     inp = ColumnInput(300, 300, 25, 420, 420, 50, 19.1, 2, 2, 9.0, 100, cover_to="long",
-                      lu_x=1100, lu_y=1100, L=1500)
+                      lu_x=1100, lu_y=1100, L=1500, stories=STORY, story_name="1")
     out = run(inp, [Combo("12", 57.08e3, -11.9e6, 0, 0, 0, Vuy=7.93e3)])
     tie = {r[0]: r[2] for r in out["summary"]}
     assert tie["ขนาดปลอก"] == "ไม่ผ่าน"

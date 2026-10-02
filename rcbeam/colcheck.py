@@ -132,12 +132,13 @@ def check_combo(inp, sec, cb):
 def run(inp, combos):
     sec = inp.section()
     out = {"sec": sec, "inp": inp, "classes": [], "Q": [], "sway": False}
-    if inp.stories:
-        out["classes"] = C.classify_stories(inp.stories)
-        mine = [c for c in out["classes"] if c.story == str(inp.story_name)]
-        out["Q"] = sorted(mine, key=lambda c: c.direction)     # ของชั้นที่เสาอยู่
-        out["sway"] = any(c.status == "sway" for c in mine)
-    out["results"] = [] if out["sway"] else [check_combo(inp, sec, cb) for cb in combos]
+    out["classes"] = C.classify_stories(inp.stories or [])
+    mine = [c for c in out["classes"] if c.story == str(inp.story_name)]
+    out["Q"] = sorted(mine, key=lambda c: c.direction)         # ของชั้นที่เสาอยู่
+    out["sway"] = any(c.status == "sway" for c in mine)
+    # ด่านบังคับ: ต้องเป็น non-sway ครบทั้งสองทิศก่อนออกแบบ (sway ปิดปรับปรุง)
+    out["gate_ok"], out["gate_msgs"] = C.nonsway_gate(out["classes"], inp.story_name)
+    out["results"] = [check_combo(inp, sec, cb) for cb in combos] if out["gate_ok"] else []
     good = [r for r in out["results"] if not r.error]
     out["gov"] = max(good, key=lambda r: r.ratio) if good else None
     out["gov_shear"] = max(good, key=lambda r: r.shear_ratio) if good else None
@@ -162,9 +163,8 @@ def summary(out):
                    f"Q max = {c.Q_max:.4f} (combo {c.combo})" +
                    (f", Q/0.35 = {c.Q_upper:.4f}" if c.Q_upper is not None else ""))
             rows.append((f"Sway ชั้น {c.story} ทิศ {c.direction.upper()}", val, st, "6.6.4.3"))
-    else:
-        rows.append(("Sway / non-sway", "ไม่ได้ป้อนข้อมูลชั้นของเสาต้นนี้ (สมมติ non-sway)", NA,
-                     "6.6.4.3"))
+    for m in out.get("gate_msgs", []):
+        rows.append(("ด่านตรวจ sway ก่อนออกแบบ", m, FAIL, "6.6.4.3"))
     res = [r for r in out.get("results", []) if not r.error]
     for r in out.get("results", []):
         if r.error:

@@ -235,6 +235,23 @@ def run():
     sw = C.classify_stories([dict(rows[0], delta_o=4.0)])[0]
     check_true("C9", "Q > 0.05 → sway", sw.status == "sway", f"Q = {sw.Q_max:.4f}")
     check_true("C9", "Mx ใช้ผลการเซทิศ y", C.sway_dir_for_axis("x") == "y")
+
+    # ---------------- C10 ด่านบังคับ non-sway ก่อนออกแบบ ----------------
+    allc = C.classify_stories(rows)
+    ok, _ = C.nonsway_gate(allc, "0–3")
+    check_true("C10", "ชั้นที่ non-sway ทั้งสองทิศ → ผ่านด่าน", ok)
+    ok, msg = C.nonsway_gate(C.classify_stories([r for r in rows if r["direction"] == "x"]), "0–3")
+    check_true("C10", "ขาดข้อมูลทิศ y → ไม่ผ่านด่าน", (not ok) and "ทิศ y" in msg[0], msg[0][:40])
+    ok, msg = C.nonsway_gate(C.classify_stories(rows), "ไม่มีชั้นนี้")
+    check_true("C10", "ไม่มีข้อมูลชั้น → ไม่ผ่านด่าน", (not ok) and len(msg) == 2)
+    sw_rows = [dict(r, delta_o=4.0) if (r["story"], r["direction"]) == ("-1.5–0", "x") else r
+               for r in rows]
+    ok, msg = C.nonsway_gate(C.classify_stories(sw_rows), "-1.5–0")
+    check_true("C10", "sway → ไม่ผ่านด่าน (ปิดปรับปรุง)", (not ok) and "ปิดปรับปรุง" in msg[0])
+    cf_rows = [dict(r, delta_o=2.5, reduced=False) if (r["story"], r["direction"]) == ("-1.5–0", "y")
+               else r for r in rows]
+    ok, msg = C.nonsway_gate(C.classify_stories(cf_rows), "-1.5–0")
+    check_true("C10", "ต้องยืนยัน → ไม่ผ่านด่าน", (not ok) and "ต้องยืนยัน" in msg[0])
     return ROWS
 
 
