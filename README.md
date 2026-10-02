@@ -5,6 +5,43 @@
 
 > ผลลัพธ์ใช้เป็นข้อมูลประกอบแผ่นคำนวณเท่านั้น ต้องมีวิศวกรผู้รับผิดชอบตรวจสอบและลงนามเอง
 
+## Mini app (Python + Streamlit)
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+เปิดเบราว์เซอร์ที่ http://localhost:8501
+
+- **แถบข้าง:** วัสดุ (เลือกหน่วย ksc หรือ MPa), หน้าตัด, ปลอก, ตัวเลือกแรงเฉือน, ช่วงคาน (ไม่บังคับ)
+- **แท็บ "ออกแบบ":** ใส่ Mu (kgf·m, + ดึงล่าง / − ดึงบน), Vu (kgf) และขนาดเหล็ก → ได้จำนวนเหล็ก (singly หรือ doubly) และระยะปลอก
+- **แท็บ "ตรวจสอบ":** ใส่จำนวนเหล็กดึงต่อชั้น เช่น `4,2`, เหล็กอัด และระยะปลอก → ได้ φMn, εt, φVn
+- แสดงรูปหน้าตัด ตารางสถานะ (ผ่าน / ไม่ผ่าน / ยังไม่ตรวจ) และรายการคำนวณทีละขั้น ดาวน์โหลดรายงานเป็น `.md` ได้
+
+### โครงสร้างโค้ด
+
+| ไฟล์ | หน้าที่ |
+|---|---|
+| `app.py` | หน้าแอป Streamlit |
+| `rcbeam/flexure.py` | แรงดัด: วิเคราะห์หน้าตัด (bisection ΣF(c) = 0), ออกแบบ singly/doubly, As,min, crack control |
+| `rcbeam/shear.py` | แรงเฉือน: Vc สมการ (a)/(b)/(c), Av,min, ออกแบบ/ตรวจปลอก |
+| `rcbeam/report.py` | ตารางสถานะและรายงาน Markdown |
+| `rcbeam/units.py` | แปลงหน่วย kgf–m ↔ MPa–mm–N |
+| `tests/test_beam.py` | เคสทดสอบ T1–T3, E1–E5 (ด้านล่าง) |
+
+รันเทสต์: `pip install pytest && python -m pytest -q`
+
+ใช้ solver ในโค้ดตรงๆ ได้ (หน่วย MPa–mm–N):
+
+```python
+from rcbeam.flexure import design_flexure
+d = design_flexure(b=300, h=600, fc=28, fy=420, Mu=250e6, cover=40, ds=10, db=25, db_c=20)
+print(d.kind, d.counts, d.result.phiMn / 1e6)   # singly [3] 275.09
+```
+
+**สมมติฐานของแอป:** ช่องว่างระหว่างชั้นเหล็กดึง 25 mm, เหล็กอัดชั้นเดียว, ระยะปลอกปัดลงทีละ 25 mm, λ = 1.0
+
 ## ขอบเขต
 
 **รองรับ**
