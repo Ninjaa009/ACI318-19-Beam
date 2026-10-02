@@ -175,6 +175,35 @@ def run():
     check_true("C7", "contour อยู่ระหว่างเส้นตรงกับมุมสี่เหลี่ยม (ไม่ใช่การเทียบแกนเดียว)",
                lin <= m45 <= min(ux, uy),
                f"{lin / 1e6:.1f} ≤ {m45 / 1e6:.1f} ≤ {min(ux, uy) / 1e6:.1f} kN·m ต่อแกน")
+    # ---------------- C8 ตัวอย่างเสาชะลูด S1 (รายการคำนวณมือ example_slender.py) ----------------
+    import example_slender as E
+    R = E.hand_calc()
+    sol = E.solver_compare(R)
+    S8 = sol["S"]
+    sx = C.slenderness(S8, "x", E.lu, E.Pu, E.Mx_t, E.Mx_b, V=E.Vx, L=E.Lmem, beta_dns=E.beta_dns)
+    sy = C.slenderness(S8, "y", E.lu, E.Pu, E.My_t, E.My_b, V=E.Vy, L=E.Lmem, beta_dns=E.beta_dns)
+    check("C8", "Q", C.stability_index(E.sumPu, E.delta_o, E.Vus, E.lc)[0], R["Q"], 1e-12)
+    check("C8", "M1/M2 แกน x (โค้งทางเดียวจาก V·L)", sx.ratio_M1M2, R["rx"], 1e-12)
+    check("C8", "M1/M2 แกน y (โค้งสองทางจาก V·L)", sy.ratio_M1M2, R["ry"], 1e-12)
+    check_true("C8", "แกน x ชะลูด / แกน y ไม่ชะลูด", sx.slender and not sy.slender,
+               f"{sx.klu_r:.2f} > {sx.limit:.0f}, {sy.klu_r:.2f} < {sy.limit:.0f}")
+    check("C8", "Pc (kN)", sx.Pc / 1e3, R["Pc"] / 1e3, 1e-6)
+    check("C8", "δ", sx.delta, R["delta"], 1e-12)
+    check("C8", "Mcx (kN·m)", sx.Mc / 1e6, R["Mcx"] / 1e6, 1e-9)
+    check("C8", "φPn,max (kN)", S8.phiPn_max / 1e3, R["phiPnmax"] / 1e3, 1e-6)
+    check("C8", "φMnx แกนเดียวที่ Pu เทียบมือ 3 แถว (kN·m)", sol["caps"][2].phiMcap / 1e6,
+          R["phiMn_u"] / 1e6, 0.01)
+    check("C8", "จุดความจุกลางเสา: fiber อิสระต่างจาก solver (%)", sol["fiber_dM"], 0.0, 0.05)
+    check("C8", "ratio กลางเสา (Mcx + Muy)", sol["caps"][1].ratio, 0.750, 0.002)
+    check_true("C8", "Bresler สรุปผ่านตรงกับ 3D (ทั้งคู่ < 1)",
+               (R["ratio_bresler"] < 1) == (sol["caps"][1].ratio < 1),
+               f"Bresler {R['ratio_bresler']:.3f}, 3D {sol['caps'][1].ratio:.3f}")
+    for dirn, V in (("y", E.Vx), ("x", E.Vy)):
+        r = C.shear_check(S8, dirn, V, E.Pu, E.s_tie, E.legs)
+        check("C8", f"Vc ทิศ {dirn} ถูกจำกัดที่ Vc,max (kN)", r.Vc / 1e3, R["Vc"] / 1e3, 1e-6)
+        check("C8", f"φVn ทิศ {dirn} (kN)", r.phiVn / 1e3, R["phiVn"] / 1e3, 1e-6)
+    tie = {x[0]: x[1] for x in C.tie_checks(S8, E.s_tie, 2, 2)}
+    check_true("C8", "รายละเอียดปลอกผ่านทุกข้อ", all(v for v in tie.values()))
     return ROWS
 
 
