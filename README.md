@@ -7,6 +7,8 @@
 
 ## Mini app (Python + Streamlit)
 
+แอปมี 2 หน้า เลือกได้จากเมนูด้านซ้าย: **คาน (Beam)** และ **เสา (Column)**
+
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
@@ -18,6 +20,20 @@ streamlit run app.py
 - **แท็บ "ออกแบบ":** ใส่ Mu (kgf·m, + ดึงล่าง / − ดึงบน), Vu (kgf) และขนาดเหล็ก → ได้จำนวนเหล็ก (singly หรือ doubly) และระยะปลอก
 - **แท็บ "ตรวจสอบ":** ใส่จำนวนเหล็กดึงต่อชั้น เช่น `4,2`, เหล็กอัด และระยะปลอก → ได้ φMn, εt, φVn
 - แสดงรูปหน้าตัด ตารางสถานะ (ผ่าน / ไม่ผ่าน / ยังไม่ตรวจ) และรายการคำนวณทีละขั้น ดาวน์โหลดรายงานเป็น `.md` ได้
+
+### หน้าเสา (Column)
+
+ใช้ solver จาก skill [`skills/rc-column-aci318m19`](skills/rc-column-aci318m19/SKILL.md) (เสาสี่เหลี่ยม ปลอกเดี่ยว โครง non-sway)
+
+- **แถบข้าง:** วัสดุ, หน้าตัดและเหล็ก (เลือกได้ว่า cover วัดถึงปลอกหรือถึงเหล็กยืนแบบ RCDC), l<sub>u</sub> / k แต่ละแกน, β<sub>dns</sub>, ข้อมูลชั้นสำหรับ Q, ตัวเลือก §18.3.3
+- **ตารางแรง:** กรอกหรือวางจาก Excel ได้หลาย combination (P<sub>u</sub>, M<sub>x</sub> / M<sub>y</sub> ปลายบน-ล่าง, V<sub>uy</sub>, V<sub>ux</sub>) หน่วย kN–m หรือ kgf–m
+- **ผลลัพธ์:**
+  - กราฟ **3D interaction surface** หมุนดูได้ พร้อมจุดโหลดทุก combination
+  - กราฟตัด M<sub>x</sub>–M<sub>y</sub> ที่ระดับ P<sub>u</sub>
+  - ตาราง ratio ทุกจุด (ปลายบน, ปลายล่าง และกลางเสาเมื่อชะลูด)
+  - ตารางความชะลูด, แรงเฉือน และสรุปสถานะ
+  - **Calsheet A4** ของเสา
+- ค่าเริ่มต้นคือตัวอย่างเสาชะลูด S1 ([รายการคำนวณมือ](skills/rc-column-aci318m19/references/example-slender-column.md))
 
 ### พิมพ์ Calsheet A4
 
@@ -46,7 +62,10 @@ streamlit run app.py
 
 | ไฟล์ | หน้าที่ |
 |---|---|
-| `app.py` | หน้าแอป Streamlit |
+| `app.py` | ตัวเลือกหน้า (st.navigation) |
+| `views/beam.py`, `views/column.py` | หน้าคาน / หน้าเสา |
+| `rcbeam/colcheck.py`, `rcbeam/col_calsheet.py` | ตรวจเสาทุก combination และ Calsheet เสา |
+| `skills/rc-column-aci318m19/` | skill เสา: solver, เคสทดสอบ 63 รายการ, ตัวอย่างเสาชะลูด |
 | `rcbeam/flexure.py` | แรงดัด: วิเคราะห์หน้าตัด (bisection ΣF(c) = 0), ออกแบบ singly/doubly, As,min, crack control |
 | `rcbeam/shear.py` | แรงเฉือน: Vc สมการ (a)/(b)/(c), Av,min, ออกแบบ/ตรวจปลอก |
 | `rcbeam/report.py` | ตารางสถานะและรายงาน Markdown |

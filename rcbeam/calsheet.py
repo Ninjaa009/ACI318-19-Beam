@@ -407,7 +407,7 @@ CSS = """
 @page { size: A4 portrait; margin: 14mm 18mm 16mm 22mm;
   @bottom-right { content: "__FOOT__ - " counter(page);
     font-family: "Times New Roman", "Liberation Serif", serif; font-size: 9pt; }
-  @bottom-left { content: "ACI 318M-19 · RC Beam Design";
+  @bottom-left { content: "__FOOTL__";
     font-family: "Times New Roman", "Liberation Serif", serif; font-size: 9pt;
     color: #666; } }
 * { box-sizing: border-box; }
@@ -482,17 +482,9 @@ def build_calsheet(title, proj, inp, fr, sr, summary, steel_text, stirrup_text,
     Mu = abs(inp.Mu)
     D = _Doc()
 
-    D.raw(f"""
-<div class="titleblk"><div class="t1">รายการคำนวณออกแบบคานคอนกรีตเสริมเหล็ก</div>
-<div class="t2">Reinforced Concrete Beam Design to ACI 318M-19 (Ultimate Strength Design)</div></div>
-<table class="info">
-<tr><td class="k">โครงการ</td><td>{_e(p.project) or '–'}</td>
-    <td class="k">ชื่อคาน</td><td>{_e(p.member) or '–'}</td></tr>
-<tr><td class="k">สถานที่</td><td>{_e(p.location) or '–'}</td>
-    <td class="k">ตำแหน่ง</td><td>{_e(p.grid) or '–'}</td></tr>
-<tr><td class="k">ผู้คำนวณ</td><td>{_e(p.designer) or '–'}</td>
-    <td class="k">วันที่</td><td>{_e(p.date) or '–'}</td></tr>
-</table>""")
+    D.raw(title_block(p, "รายการคำนวณออกแบบคานคอนกรีตเสริมเหล็ก",
+                      "Reinforced Concrete Beam Design to ACI 318M-19 (Ultimate Strength Design)",
+                      "ชื่อคาน"))
 
     D.h("ข้อมูลออกแบบ", "Design Data")
     ksc = lambda x: rf"{u.mpa_to_ksc(x):,.0f}".replace(",", "{,}") + \
@@ -537,36 +529,60 @@ def build_calsheet(title, proj, inp, fr, sr, summary, steel_text, stirrup_text,
 <li>ไม่รองรับ T/L-beam, แรงบิด, แรงตามแกน, deep beam, SMF/IMF, ปลอกเฉียง</li>
 <li>รายการ “ยังไม่ตรวจ” ต้องตรวจสอบเพิ่มเติม และเลขข้อ/สูตรต้องเทียบกับตัวเล่มมาตรฐานและ errata</li>
 </ul>
-<table class="sign"><tr>
+{sign_block(p)}""")
+
+    return page_html(p, D.html(), "RC BEAM", "RC-Beam", "ACI 318M-19 · RC Beam Design")
+
+
+def title_block(p, th, en, member_label):
+    """หัวเอกสารหน้าแรก + ตารางข้อมูลโครงการ"""
+    return f"""
+<div class="titleblk"><div class="t1">{th}</div><div class="t2">{en}</div></div>
+<table class="info">
+<tr><td class="k">โครงการ</td><td>{_e(p.project) or '–'}</td>
+    <td class="k">{member_label}</td><td>{_e(p.member) or '–'}</td></tr>
+<tr><td class="k">สถานที่</td><td>{_e(p.location) or '–'}</td>
+    <td class="k">ตำแหน่ง</td><td>{_e(p.grid) or '–'}</td></tr>
+<tr><td class="k">ผู้คำนวณ</td><td>{_e(p.designer) or '–'}</td>
+    <td class="k">วันที่</td><td>{_e(p.date) or '–'}</td></tr>
+</table>"""
+
+
+def sign_block(p):
+    return f"""<table class="sign"><tr>
 <td>ลงชื่อ ......................................<br>
 ({_e(p.designer) or '......................................'})<br>ผู้คำนวณ</td>
 <td>ลงชื่อ ......................................<br>
 ({_e(p.checker) or '......................................'})<br>ผู้ตรวจสอบ</td>
 <td>ลงชื่อ ......................................<br>
 (......................................)<br>วิศวกรผู้รับผิดชอบ</td>
-</tr></table>""")
+</tr></table>"""
 
-    foot = "".join(ch for ch in f"{p.member or 'Beam'} RC-Beam ACI318M-19"
-                   if ch not in '"\\<>{}')
+
+def page_html(p, body, mark, kind, foot_left):
+    """กรอบเอกสาร A4: หัวกระดาษ Calculation Sheet ทุกหน้า + ท้ายกระดาษ"""
+    clean = lambda t: "".join(ch for ch in t if ch not in '"\\<>{}')  # noqa: E731
+    foot = clean(f"{p.member or 'Member'} {kind} ACI318M-19")
+    css = CSS.replace("__FOOT__", foot).replace("__FOOTL__", clean(foot_left))
     return f"""<!doctype html>
 <html lang="th"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Calsheet {_e(p.member or 'Beam')}</title>
 <style>{font_css()}
-{CSS.replace("__FOOT__", foot)}</style></head>
+{css}</style></head>
 <body>
 <div class="toolbar"><button onclick="window.print()">พิมพ์ / Save as PDF (A4)</button></div>
 <div class="sheet">
 <table class="page"><thead><tr><td>
 <div class="ph">
-  <div class="mark">RC BEAM<small>ACI 318M-19 · ULTIMATE STRENGTH DESIGN</small></div>
+  <div class="mark">{mark}<small>ACI 318M-19 · ULTIMATE STRENGTH DESIGN</small></div>
   <div class="rt"><div class="ttl">Calculation Sheet</div>
     <div class="fld">Project: <span>{_e(p.project) or '&nbsp;'}</span></div>
     <div class="fld">Member: <span>{_e(p.member) or '&nbsp;'}</span></div></div>
 </div>
 </td></tr></thead>
 <tbody><tr><td>
-{D.html()}
+{body}
 </td></tr></tbody></table>
 </div>
 </body></html>"""

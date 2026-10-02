@@ -334,6 +334,17 @@ def capacity_at(sec, Pu, Mux, Muy, factored=True):
     return Capacity(Pu, Mux, Muy, Mres, math.degrees(math.atan2(Mux, Muy)), Mcap, ratio, pt)
 
 
+def contour_at(sec, Pu, n=72):
+    """เส้นตัด surface ที่ φPn = Pu: list ของ (φMnx, φMny) ใช้วาดกราฟ Mx–My (ว่างถ้า Pu เกินช่วง)"""
+    if Pu > sec.phiPn_max or Pu < -PHI_T * min(sec.fy, 550.0) * sec.Ast:
+        return []
+    pts = []
+    for i in range(n + 1):
+        pt = _c_for_P(sec, 2 * math.pi * i / n, Pu)
+        pts.append((pt.phiMnx, pt.phiMny))
+    return pts
+
+
 def surface(sec, n_theta=36, n_c=30):
     """จุดบน φ-surface สำหรับพล็อต: list ของ (φPn, φMnx, φMny) ตัดที่ φPn,max"""
     pts = []
@@ -503,6 +514,9 @@ class ShearResult:
 
     @property
     def spacing_ok(self):
+        """§10.7.6.5.2 ใช้เมื่อต้องมีเหล็กรับแรงเฉือน (Vu > 0.5φVc) — ไม่เช่นนั้นระยะปลอกคุมด้วย §25.7.2.1"""
+        if not self.min_required:
+            return True
         return self.s == 0 or self.s <= self.s_max + 1e-9
 
     @property

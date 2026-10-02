@@ -202,6 +202,8 @@ def run():
         r = C.shear_check(S8, dirn, V, E.Pu, E.s_tie, E.legs)
         check("C8", f"Vc ทิศ {dirn} ถูกจำกัดที่ Vc,max (kN)", r.Vc / 1e3, R["Vc"] / 1e3, 1e-6)
         check("C8", f"φVn ทิศ {dirn} (kN)", r.phiVn / 1e3, R["phiVn"] / 1e3, 1e-6)
+        check_true("C8", f"ทิศ {dirn}: Vu ≤ 0.5φVc → ไม่คุมระยะ d/2 (§10.7.6.5.2) ผ่านทั้งหมด",
+                   (not r.min_required) and r.ok, f"s = 250 > d/2 = {r.d / 2:.0f} mm แต่ไม่บังคับ")
     tie = {x[0]: x[1] for x in C.tie_checks(S8, E.s_tie, 2, 2)}
     check_true("C8", "รายละเอียดปลอกผ่านทุกข้อ", all(v for v in tie.values()))
     return ROWS
