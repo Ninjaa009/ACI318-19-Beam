@@ -206,6 +206,35 @@ def run():
                    (not r.min_required) and r.ok, f"s = 250 > d/2 = {r.d / 2:.0f} mm แต่ไม่บังคับ")
     tie = {x[0]: x[1] for x in C.tie_checks(S8, E.s_tie, 2, 2)}
     check_true("C8", "รายละเอียดปลอกผ่านทุกข้อ", all(v for v in tie.values()))
+
+    # ---------------- C9 จำแนก sway / non-sway (ตาราง Q ของรายงาน RCDC) ----------------
+    rcdc = [("-1.5–0", "x", "13", 1083.58, 0.75, 49.11, 1.5), ("0–3", "x", "13", 630.46, 1.16, 36.92, 3),
+            ("3–6", "x", "13", 177.34, 0.52, 12.52, 3), ("-1.5–0", "y", "15", 1083.58, 0.63, 36.84, 1.5),
+            ("0–3", "y", "15", 630.46, 0.97, 27.69, 3), ("3–6", "y", "15", 177.34, 0.45, 9.39, 3)]
+    rows = [dict(story=st, direction=d, combo=cb, sumPu=P * 1e3, delta_o=do, Vus=V * 1e3,
+                 lc=lc * 1e3, reduced=True) for st, d, cb, P, do, V, lc in rcdc]
+    cls = {(c.story, c.direction): c for c in C.classify_stories(rows)}
+    for (st, d), exp in ((("-1.5–0", "x"), 0.011), (("0–3", "x"), 0.007), (("3–6", "x"), 0.002),
+                         (("-1.5–0", "y"), 0.012), (("0–3", "y"), 0.007), (("3–6", "y"), 0.003)):
+        check("C9", f"Q ชั้น {st} ทิศ {d} เทียบ RCDC", cls[(st, d)].Q_max, exp, 0.0006)
+    check_true("C9", "ทุกชั้นเป็น non-sway", all(c.status == "non-sway" for c in cls.values()))
+    # ใช้ Q สูงสุดจากหลาย combo
+    multi = rows[:1] + [dict(rows[0], combo="W2", delta_o=1.6)] + [dict(rows[0], combo="G", Vus=0)]
+    c2 = C.classify_stories(multi)[0]
+    check("C9", "Q สูงสุดจากหลาย combo (ข้าม combo ที่ Vus = 0)", c2.Q_max,
+          1083.58 * 1.6 / (49.11 * 1500), 1e-12)
+    check_true("C9", "combo วิกฤตคือ W2", c2.combo == "W2")
+    # ยังไม่ลด stiffness
+    nr = [dict(rows[0], reduced=False)]
+    check_true("C9", "ไม่ลด stiffness แต่ Q/0.35 ≤ 0.05 → non-sway",
+               C.classify_stories(nr)[0].status == "non-sway")
+    nr2 = [dict(rows[0], reduced=False, delta_o=2.5)]
+    c3 = C.classify_stories(nr2)[0]
+    check_true("C9", "ไม่ลด stiffness และ Q ≤ 0.05 < Q/0.35 → ต้องยืนยัน", c3.status == "ต้องยืนยัน",
+               f"Q = {c3.Q_max:.4f}, Q/0.35 = {c3.Q_upper:.4f}")
+    sw = C.classify_stories([dict(rows[0], delta_o=4.0)])[0]
+    check_true("C9", "Q > 0.05 → sway", sw.status == "sway", f"Q = {sw.Q_max:.4f}")
+    check_true("C9", "Mx ใช้ผลการเซทิศ y", C.sway_dir_for_axis("x") == "y")
     return ROWS
 
 

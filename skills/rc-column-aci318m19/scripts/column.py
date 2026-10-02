@@ -367,6 +367,76 @@ def stability_index(sum_Pu, delta_o, Vus, lc):
     return Q, Q <= 0.05
 
 
+@dataclass
+class StoryClass:
+    story: str
+    direction: str             # ทิศการเซ "x" | "y"
+    Q_max: float
+    combo: str                 # combo ที่ให้ Q สูงสุด
+    nonsway: bool              # ผลจำแนก (ใช้ Q ที่ป้อน)
+    Q_upper: float = None      # Q/0.35 เมื่อโมเดลยังไม่ลด stiffness (ประมาณขอบบน)
+    status: str = ""           # "non-sway" | "sway" | "ต้องยืนยัน" | "ไม่มีข้อมูล"
+    notes: list = field(default_factory=list)
+    rows: list = field(default_factory=list)   # (combo, ΣPu, Vus, Δo, lc, Q)
+
+
+def classify_stories(rows):
+    """จำแนก sway / non-sway ทุกชั้นทุกทิศ (§6.6.4.3(b), Q ตาม §6.6.4.4.1)
+
+    rows: list ของ dict {story, direction ("x"|"y"), combo, sumPu (N), Vus (N), delta_o (mm),
+                         lc (mm), reduced (bool: Δo จากโมเดลที่ลด stiffness ตาม §6.6.3.1.1 แล้ว)}
+    กติกาของสกิล:
+    - ใช้ Q สูงสุดของ (ชั้น, ทิศ) จากทุก combo ที่มีแรงด้านข้าง (Vus > 0)
+    - combo ที่มีแต่แรงแนวดิ่งใช้ผลจำแนกของชั้น/ทิศนั้น (เป็นคุณสมบัติของโครง)
+    - ถ้าโมเดลยังไม่ลด stiffness: Δo จริงอาจมากขึ้นถึง 1/0.35 เท่า → ถ้า Q/0.35 ≤ 0.05 ยืนยัน
+      non-sway ได้, ถ้า Q ≤ 0.05 < Q/0.35 → "ต้องยืนยัน" (รันโมเดลลด stiffness)
+    - Q อยู่ระหว่าง 0.04–0.05 → เตือนว่าใกล้เกณฑ์
+    """
+    groups = {}
+    for r in rows:
+        groups.setdefault((str(r["story"]), r["direction"]), []).append(r)
+    out = []
+    for (story, d), rs in groups.items():
+        data = []
+        for r in rs:
+            if not r.get("Vus") or not r.get("lc"):
+                continue
+            Q = r["sumPu"] * r["delta_o"] / (r["Vus"] * r["lc"])
+            data.append((str(r.get("combo", "")), r["sumPu"], r["Vus"], r["delta_o"], r["lc"], Q,
+                         bool(r.get("reduced", False))))
+        if not data:
+            out.append(StoryClass(story, d, math.nan, "", False, status="ไม่มีข้อมูล",
+                                  notes=["ไม่มี combo ที่มีแรงด้านข้าง (Vus > 0)"]))
+            continue
+        g = max(data, key=lambda t: t[5])
+        Q = g[5]
+        S = StoryClass(story, d, Q, g[0], Q <= 0.05, rows=[t[:6] for t in data])
+        all_reduced = all(t[6] for t in data)
+        if Q > 0.05:
+            S.status = "sway"
+        elif all_reduced:
+            S.status = "non-sway"
+        else:
+            S.Q_upper = Q / 0.35
+            if S.Q_upper <= 0.05:
+                S.status = "non-sway"
+                S.notes.append(f"โมเดลยังไม่ลด stiffness แต่ Q/0.35 = {S.Q_upper:.4f} ≤ 0.05 "
+                               "จึงยังเป็น non-sway")
+            else:
+                S.status = "ต้องยืนยัน"
+                S.notes.append(f"โมเดลยังไม่ลด stiffness: Q/0.35 = {S.Q_upper:.4f} > 0.05 → "
+                               "รันโมเดลที่ลด stiffness (คาน 0.35Ig, เสา 0.70Ig) เพื่อยืนยัน")
+        if 0.04 <= Q <= 0.05:
+            S.notes.append("Q ใกล้เกณฑ์ 0.05")
+        out.append(S)
+    return out
+
+
+def sway_dir_for_axis(axis):
+    """เสาดัดรอบแกน x (Mx) เกิดจากการเซในทิศ y และกลับกัน"""
+    return "y" if axis == "x" else "x"
+
+
 def curvature_ratio(M_top, M_bot, V=None, L=None, curvature=None):
     """คืน (M1/M2 ตาม ACI, คำอธิบาย) — ลบ = โค้งทางเดียว, บวก = โค้งสองทาง (§6.2.5.1)
 

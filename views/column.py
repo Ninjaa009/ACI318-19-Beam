@@ -72,19 +72,6 @@ with st.sidebar:
     EI_method = st.radio("(EI)eff", ["a", "b"], horizontal=True, key="c_ei",
                          format_func=lambda x: {"a": "(a) 0.4EcIg", "b": "(b) 0.2EcIg+EsIse"}[x])
 
-    st.header("เสถียรภาพของชั้น (Q)")
-    use_story = st.checkbox("ป้อนข้อมูลชั้น", value=True, key="c_story")
-    story = None
-    if use_story:
-        sumPu = st.number_input("ΣPu ของชั้น (kN)", 0.0, 1e7, 24000.0, 100.0, key="c_sp")
-        c1, c2 = st.columns(2)
-        do_x = c1.number_input("Δo ทิศ x (mm)", 0.0, 500.0, 3.2, 0.1, key="c_dox")
-        vus_x = c1.number_input("Vus ทิศ x (kN)", 0.0, 1e6, 900.0, 10.0, key="c_vx")
-        do_y = c2.number_input("Δo ทิศ y (mm)", 0.0, 500.0, 3.2, 0.1, key="c_doy")
-        vus_y = c2.number_input("Vus ทิศ y (kN)", 0.0, 1e6, 900.0, 10.0, key="c_vy")
-        lc = u.m_to_mm(st.number_input("lc ความสูงชั้น (m)", 0.5, 30.0, 5.0, 0.1, key="c_lc"))
-        story = {"sumPu": sumPu * 1e3, "do_x": do_x, "Vus_x": vus_x * 1e3, "do_y": do_y,
-                 "Vus_y": vus_y * 1e3, "lc": lc}
     omf = st.checkbox("§18.3.3 เสา OMF ใน SDC B", value=False, key="c_omf",
                       help="แรงเฉือนจาก Mn ที่ปลายเสา (ใช้เมื่อ l_u ≤ 5c1)")
 
@@ -125,6 +112,28 @@ df = st.data_editor(
         "โค้ง y": st.column_config.SelectboxColumn(options=CURV),
     })
 
+# ---------------------------------------------------------------- stories (sway / non-sway)
+st.subheader("ข้อมูลชั้น: จำแนก sway / non-sway (ACI 6.6.4.3)")
+st.caption(f"ป้อนทุกชั้น ทุกทิศ ทุก combo ที่มีแรงด้านข้าง · Q = ΣPu·Δo/(Vus·lc) · ΣPu รวมทุกเสา/ผนังในชั้น · "
+           f"Vus = แรงเฉือนของชั้น (ไม่ใช่ base shear) · Δo = ค่าบน − ค่าล่าง จากการวิเคราะห์ลำดับหนึ่ง · "
+           f"lc = ความสูงชั้น c/c · แรงใช้หน่วย {fu}")
+story_default = pd.DataFrame([
+    {"ชั้น": "1", "ทิศ": "x", "Combo": "W+X", "ΣPu": 24000.0, "Vus": 900.0, "Δo (mm)": 3.2,
+     "lc (m)": 5.0, "ลด stiffness แล้ว": True},
+    {"ชั้น": "1", "ทิศ": "y", "Combo": "W+Y", "ΣPu": 24000.0, "Vus": 900.0, "Δo (mm)": 3.2,
+     "lc (m)": 5.0, "ลด stiffness แล้ว": True},
+])
+sdf = st.data_editor(
+    story_default, num_rows="dynamic", width="stretch", key="c_stories",
+    column_config={
+        "ทิศ": st.column_config.SelectboxColumn(options=["x", "y"], required=True),
+        "ΣPu": num(f"ΣPu ({fu})"), "Vus": num(f"Vus ({fu})"),
+        "ลด stiffness แล้ว": st.column_config.CheckboxColumn(
+            help="Δo จากโมเดลที่ใช้ 0.35Ig คาน / 0.70Ig เสา (ACI 6.6.3.1.1)"),
+    })
+story_names = [str(x) for x in sdf["ชั้น"].dropna().unique()] if len(sdf) else []
+story_name = st.selectbox("เสาต้นนี้อยู่ชั้น", story_names or ["(ไม่มีข้อมูลชั้น)"], key="c_mystory")
+
 if st.button("ตรวจสอบเสา", type="primary"):
     st.session_state.col_go = True
 if not st.session_state.get("col_go"):
@@ -153,10 +162,19 @@ if not combos:
     st.error("ยังไม่มี load combination")
     st.stop()
 
+stories = []
+for _, r in sdf.iterrows():
+    if pd.isna(r.get("ชั้น")) or pd.isna(r.get("ΣPu")):
+        continue
+    stories.append(dict(story=str(r["ชั้น"]), direction=r.get("ทิศ") or "x",
+                        combo=str(r.get("Combo") or ""), sumPu=val(r["ΣPu"]) * F,
+                        Vus=val(r["Vus"]) * F, delta_o=val(r["Δo (mm)"]),
+                        lc=u.m_to_mm(val(r["lc (m)"])), reduced=bool(r.get("ลด stiffness แล้ว"))))
+
 try:
     inp = ColumnInput(b, h, fc, fy, fyt, cover, float(db), int(nx), int(ny), float(ds), s,
                       int(legs_x), int(legs_y), cover_to, dagg, grade420, lu_x, lu_y, k_x, k_y, L,
-                      beta, r_method, EI_method, story, omf, cover_min)
+                      beta, r_method, EI_method, stories, story_name, omf, cover_min)
     out = run(inp, combos)
 except ValueError as e:
     st.error(f"ข้อมูลไม่ถูกต้อง: {e}")
@@ -166,8 +184,28 @@ sec = out["sec"]
 fF = lambda x: x / F  # noqa: E731   N → หน่วยผู้ใช้
 fM = lambda x: x / M  # noqa: E731
 
+def show_classes():
+    rows = []
+    for c in out["classes"]:
+        for cb, P, V, do, lc_, Q in c.rows:
+            rows.append({"ชั้น": c.story, "ทิศ": c.direction, "Combo": cb, f"ΣPu ({fu})": fF(P),
+                         f"Vus ({fu})": fF(V), "Δo (mm)": do, "lc (m)": lc_ / 1000, "Q": Q,
+                         "ผล (Q max ของชั้น/ทิศ)": c.status if cb == c.combo else ""})
+        if not c.rows:
+            rows.append({"ชั้น": c.story, "ทิศ": c.direction, "ผล (Q max ของชั้น/ทิศ)": c.status})
+    if rows:
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                     column_config={"Q": st.column_config.NumberColumn(format="%.4f")})
+    for c in out["classes"]:
+        for n in c.notes:
+            (st.warning if c.status == "ต้องยืนยัน" else st.info)(f"ชั้น {c.story} ทิศ {c.direction}: {n}")
+
+
 if out["sway"]:
-    st.error("Q > 0.05 → โครง **sway** ซึ่งอยู่นอกขอบเขตของโปรแกรม (ยังไม่รองรับ δs)")
+    mine = [f"ทิศ {c.direction} (Q = {c.Q_max:.4f})" for c in out["Q"] if c.status == "sway"]
+    st.error(f"ชั้น {story_name} เป็นโครง **sway** {', '.join(mine)} — อยู่นอกขอบเขตของโปรแกรม "
+             "(ยังไม่รองรับ δs) ใช้โมเมนต์จาก P-Δ analysis หรือรอส่วน sway")
+    show_classes()
     st.dataframe(pd.DataFrame(out["summary"], columns=["รายการ", "ค่า", "สถานะ", "อ้างอิง"]),
                  hide_index=True, width="stretch")
     st.stop()
@@ -189,13 +227,21 @@ nsl = sum(1 for r in out["results"] if not r.error and (r.sx.slender or r.sy.sle
 m4.metric("ชะลูด", f"{nsl}/{len(out['results'])} combo")
 
 checked = [row for row in out["summary"] if row[2] in (PASS, FAIL)]
-if all(row[2] == PASS for row in checked) and not bad:
+confirm = [row for row in out["summary"] if row[2] == "ต้องยืนยัน"]
+if confirm and all(row[2] == PASS for row in checked) and not bad:
+    st.warning("กำลังผ่าน แต่การจำแนก non-sway **ต้องยืนยัน** (โมเดลยังไม่ลด stiffness) — ดูแท็บ sway / non-sway")
+elif all(row[2] == PASS for row in checked) and not bad:
     st.success("รายการที่ตรวจแล้วผ่านทั้งหมด — รายการ \"ยังไม่ตรวจ\" / \"ไม่มีข้อมูล\" ต้องตรวจเพิ่มเอง")
 else:
     st.error("มีรายการไม่ผ่าน — ดูตารางสรุป")
 
-t3d, t2d, tres, tsl, tsh, tsum = st.tabs(["3D interaction", "กราฟตัดที่ Pu", "ผลทุก combo",
-                                          "ความชะลูด", "แรงเฉือน", "สรุป"])
+t3d, t2d, tres, tq, tsl, tsh, tsum = st.tabs(["3D interaction", "กราฟตัดที่ Pu", "ผลทุก combo",
+                                              "sway / non-sway", "ความชะลูด", "แรงเฉือน", "สรุป"])
+
+with tq:
+    show_classes()
+    st.caption("Mx (ดัดรอบแกน x) ใช้ผลการเซทิศ y · My ใช้ผลการเซทิศ x · combo ที่มีแต่แรงแนวดิ่ง"
+               "ใช้ผลจำแนกของชั้น/ทิศ")
 
 with t3d:
     surf = C.surface(sec, n_theta=48, n_c=28)

@@ -5,11 +5,12 @@ from rcbeam.calsheet import ProjectInfo
 from rcbeam.col_calsheet import build_column_calsheet
 from rcbeam.colcheck import ColumnInput, Combo, run
 
-STORY = {"sumPu": 24000e3, "do_x": 3.2, "Vus_x": 900e3, "do_y": 3.2, "Vus_y": 900e3, "lc": 5000}
+STORY = [dict(story="1", direction=d, combo="W", sumPu=24000e3, Vus=900e3, delta_o=3.2,
+              lc=5000, reduced=True) for d in ("x", "y")]
 
 
 def s1_input(**kw):
-    args = dict(lu_x=4500, lu_y=4500, L=5000, story=STORY)
+    args = dict(lu_x=4500, lu_y=4500, L=5000, stories=STORY, story_name="1")
     args.update(kw)
     return ColumnInput(400, 400, 28, 420, 420, 40, 20, 3, 3, 10, 250, **args)
 
@@ -27,9 +28,15 @@ def test_s1_matches_worked_example():
 
 
 def test_sway_stops_checks():
-    story = dict(STORY, do_x=40.0)
-    out = run(s1_input(story=story), [S1])
+    stories = [dict(STORY[0], delta_o=40.0), STORY[1]]
+    out = run(s1_input(stories=stories), [S1])
     assert out["sway"] and out["results"] == []
+
+
+def test_other_story_does_not_affect_column():
+    stories = STORY + [dict(STORY[0], story="2", delta_o=40.0)]
+    out = run(s1_input(stories=stories), [S1])
+    assert not out["sway"] and len(out["classes"]) == 3
 
 
 def test_rcdc_column_with_rb9_ties_fails_tie_size():

@@ -281,14 +281,39 @@ def build_column_calsheet(proj, out):
     D.sub("แรงประลัย (Factored Loads) หน่วย kN, kN·m")
     D.raw(f'<table class="grid num full"><thead><tr>{hdr}</tr></thead><tbody>{rows}</tbody></table>')
 
-    D.h("เสถียรภาพของชั้น", "Stability Index")
-    if out["Q"]:
-        st = inp.story
-        for d, Q, ok in out["Q"]:
-            D.eq(rf"Q_{d} = \frac{{\sum P_u\,\Delta_o}}{{V_{{us}}\,l_c}} = \frac{{{_n(kN(st['sumPu']), 0)}"
-                 rf"{X}{st['do_' + d]:g}}}{{{_n(kN(st['Vus_' + d]), 0)}{X}{_n(st['lc'], 0)}}} = "
-                 rf"{Q:.4f}\ {_le(ok)}\ 0.05", ref="ACI 6.6.4.3", check=ok,
-                 note="non-sway" if ok else "sway")
+    D.h("การจำแนกโครง sway / non-sway", "Stability Index")
+    if out["classes"]:
+        D.p("ตรวจทุกชั้นทุกทิศ ใช้ Q สูงสุดจากทุก combination ที่มีแรงด้านข้าง; Δ<sub>o</sub> จากการวิเคราะห์"
+            "ลำดับหนึ่งของโมเดลที่ลด stiffness (คาน 0.35I<sub>g</sub>, เสา 0.70I<sub>g</sub>, ACI 6.6.3.1.1)")
+        D.eq(r"Q = \frac{\sum P_u\,\Delta_o}{V_{us}\,l_c} \leq 0.05", ref="ACI 6.6.4.3(b)",
+             note="→ non-sway")
+        trs = []
+        for c in out["classes"]:
+            mark = (' style="font-weight:700"' if c.story == str(inp.story_name) else "")
+            for cb, P, V, do, lc, Q in c.rows:
+                trs.append(f"<tr{mark}><td>{_e(c.story)}</td><td>{c.direction.upper()}</td>"
+                           f"<td>{_e(cb)}</td><td>{kN(P):,.1f}</td><td>{kN(V):,.2f}</td>"
+                           f"<td>{do:g}</td><td>{lc / 1000:g}</td><td>{Q:.4f}</td>"
+                           f"<td>{_e(c.status) if cb == c.combo else ''}</td></tr>")
+            if not c.rows:
+                trs.append(f"<tr{mark}><td>{_e(c.story)}</td><td>{c.direction.upper()}</td>"
+                           f"<td colspan='7'>{_e(c.status)}</td></tr>")
+        D.raw('<table class="grid num full"><thead><tr><th>ชั้น</th><th>ทิศ</th><th>Combo</th>'
+              "<th>ΣP<sub>u</sub> (kN)</th><th>V<sub>us</sub> (kN)</th><th>Δ<sub>o</sub> (mm)</th>"
+              "<th>l<sub>c</sub> (m)</th><th>Q</th><th>ผล</th></tr></thead><tbody>"
+              + "".join(trs) + "</tbody></table>")
+        for c in out["Q"]:
+            if not c.rows:
+                continue
+            g = next(r for r in c.rows if r[0] == c.combo)
+            D.eq(rf"Q_{{{c.direction}}} = \frac{{{_n(kN(g[1]), 1)}{X}{g[3]:g}}}{{{_n(kN(g[2]), 2)}"
+                 rf"{X}{_n(g[4], 0)}}} = {c.Q_max:.4f}\ {_le(c.Q_max <= 0.05)}\ 0.05",
+                 ref="ACI 6.6.4.4.1", check=c.status == "non-sway",
+                 note=f"ชั้น {_e(c.story)} ทิศ {c.direction.upper()}: {_e(c.status)}")
+            for n in c.notes:
+                D.p(f"<i>หมายเหตุ: {_e(n)}</i>")
+        D.p(f"เสาต้นนี้อยู่ชั้น <b>{_e(inp.story_name)}</b> — การดัดรอบแกน x ใช้ผลการเซทิศ Y "
+            "และการดัดรอบแกน y ใช้ผลการเซทิศ X")
     else:
         D.p("ไม่ได้ป้อนข้อมูลชั้น — สมมติว่าเป็นโครง non-sway (ต้องยืนยันด้วย Q ≤ 0.05 ตาม ACI 6.6.4.3)")
     if out["sway"]:

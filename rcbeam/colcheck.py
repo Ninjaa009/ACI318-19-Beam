@@ -41,7 +41,8 @@ class ColumnInput:
     beta_dns: float = 0.6
     r_method: str = "exact"
     EI_method: str = "a"
-    story: dict = None           # {"sumPu", "do_x", "Vus_x", "do_y", "Vus_y", "lc"}
+    stories: list = None         # แถวข้อมูลชั้นสำหรับ classify_stories (ทุกชั้น ทุกทิศ ทุก combo)
+    story_name: str = ""         # ชั้นที่เสาต้นนี้อยู่
     omf: bool = False            # §18.3.3 (OMF ใน SDC B)
     cover_min: float = 40.0
 
@@ -130,14 +131,12 @@ def check_combo(inp, sec, cb):
 
 def run(inp, combos):
     sec = inp.section()
-    out = {"sec": sec, "inp": inp, "Q": [], "sway": False}
-    if inp.story:
-        st = inp.story
-        for d in ("x", "y"):
-            if st.get("do_" + d) and st.get("Vus_" + d):
-                Q, ok = C.stability_index(st["sumPu"], st["do_" + d], st["Vus_" + d], st["lc"])
-                out["Q"].append((d, Q, ok))
-                out["sway"] |= not ok
+    out = {"sec": sec, "inp": inp, "classes": [], "Q": [], "sway": False}
+    if inp.stories:
+        out["classes"] = C.classify_stories(inp.stories)
+        mine = [c for c in out["classes"] if c.story == str(inp.story_name)]
+        out["Q"] = sorted(mine, key=lambda c: c.direction)     # ของชั้นที่เสาอยู่
+        out["sway"] = any(c.status == "sway" for c in mine)
     out["results"] = [] if out["sway"] else [check_combo(inp, sec, cb) for cb in combos]
     good = [r for r in out["results"] if not r.error]
     out["gov"] = max(good, key=lambda r: r.ratio) if good else None
@@ -157,11 +156,15 @@ def _st(ok):
 def summary(out):
     rows = []
     if out["Q"]:
-        for d, Q, ok in out["Q"]:
-            rows.append((f"Stability index ทิศ {d.upper()}", f"Q = {Q:.4f} ≤ 0.05",
-                         PASS if ok else "หยุด: sway (ไม่รองรับ)", "6.6.4.3"))
+        for c in out["Q"]:
+            st = {"non-sway": PASS, "sway": "หยุด: sway (ไม่รองรับ)"}.get(c.status, c.status)
+            val = ("ไม่มี combo ที่มีแรงด้านข้าง" if math.isnan(c.Q_max) else
+                   f"Q max = {c.Q_max:.4f} (combo {c.combo})" +
+                   (f", Q/0.35 = {c.Q_upper:.4f}" if c.Q_upper is not None else ""))
+            rows.append((f"Sway ชั้น {c.story} ทิศ {c.direction.upper()}", val, st, "6.6.4.3"))
     else:
-        rows.append(("Stability index", "ไม่ได้ป้อนข้อมูลชั้น (สมมติ non-sway)", NA, "6.6.4.3"))
+        rows.append(("Sway / non-sway", "ไม่ได้ป้อนข้อมูลชั้นของเสาต้นนี้ (สมมติ non-sway)", NA,
+                     "6.6.4.3"))
     res = [r for r in out.get("results", []) if not r.error]
     for r in out.get("results", []):
         if r.error:
