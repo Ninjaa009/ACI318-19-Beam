@@ -289,6 +289,31 @@ def run():
     check_true("C11", "V ไม่สอดคล้องกับโมเมนต์ (จับคู่แกนผิด) → แจ้งให้ระบุเอง", bad)
     r, _ = C.curvature_ratio(90e6, 60e6, V=6.3e3, L=5000)
     check_true("C11", "คลาดเคลื่อน 5% ยังตัดสินได้ (โค้งทางเดียว)", r < 0)
+
+    # ---------------- C12 วางตาราง Beam End Force ของ STAAD ทั้งก้อน ----------------
+    txt = ("Beam\tL/C\tNode\tAxial Force\tShear-Y\tShear-Z\tTorsion\tMoment-Y\tMoment-Z\n"
+           "\t\t\tkg\tkg\tkg\tkN-m\tkN-m\tkN-m\n"
+           "12\t102\t24\t-5708.917\t-890.992\t753.547\t0.009\t17.505\t20.958\n"
+           "12\t102\t12\t7764.665\t890.992\t-753.547\t-0.009\t8.359\t9.624\n"
+           "12\t2\t24\t-1619.806\t-277.428\t235.279\t0.004\t5.466\t6.526\n"
+           "12\t2\t12\t1619.806\t277.428\t-235.279\t-0.004\t2.610\t2.996\n")
+    rows, fu, mu = C.parse_staad_end_forces(txt)
+    check_true("C12", "อ่าน 4 แถว + หน่วยจากหัวตาราง (kg, kN-m)", (len(rows), fu, mu) == (4, "kg", "kN-m"))
+    node, sure = C.guess_start_node(rows)
+    check_true("C12", "เดา start node = 12 (Fx > 0 = อัด)", node == "12" and sure)
+    pairs, errs = C.pair_staad_rows(rows, "12")
+    f = dict(pairs)["102"]
+    check_true("C12", "L/C 102: P = Fx(node 12), Mz 20.958/9.624, My 17.505/8.359",
+               not errs and (f["Pu"], f["Mxt"], f["Mxb"], f["Myt"], f["Myb"], f["Vuy"], f["Vux"])
+               == (7764.665, 20.958, 9.624, 17.505, 8.359, 890.992, 753.547))
+    Fy = 890.992 * C.STAAD_FORCE_UNITS["kg"]                 # N
+    r, _ = C.curvature_ratio(20.958e6, 9.624e6, V=Fy, L=3500)
+    check_true("C12", "หน่วยผสม kg / kN-m แปลงแล้วสมดุลได้ (โค้งสองทาง, L = 3.5 m)", r > 0)
+    rows2, _, _ = C.parse_staad_end_forces("12 101 24 -4601.253 -686.815 580.044 0.005 13.475 16.155")
+    _, errs = C.pair_staad_rows(rows2, "12")
+    check_true("C12", "L/C ที่มีแถวเดียว → แจ้งผิดพลาด", len(errs) == 1)
+    rows3, _, _ = C.parse_staad_end_forces("5   101 1.2D+1.6L   3   100   1   2   0   3   4")
+    check_true("C12", "L/C มีชื่อต่อท้าย", rows3 and rows3[0]["lc"] == "101 1.2D+1.6L" and rows3[0]["node"] == "3")
     return ROWS
 
 

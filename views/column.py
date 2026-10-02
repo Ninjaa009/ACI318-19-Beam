@@ -106,6 +106,16 @@ fM = lambda x: x / M  # noqa: E731
 num = lambda lab: st.column_config.NumberColumn(lab, format="%.2f")  # noqa: E731
 
 
+STAAD_SAMPLE = """Beam\tL/C\tNode\tAxial Force\tShear-Y\tShear-Z\tTorsion\tMoment-Y\tMoment-Z
+\t\t\tkN\tkN\tkN\tkN-m\tkN-m\tkN-m
+1\t101\t1\t1600.000\t-6.000\t10.000\t0.000\t-20.000\t60.000
+1\t101\t2\t-1600.000\t6.000\t-10.000\t0.000\t-30.000\t-90.000
+1\t102\t1\t900.000\t15.000\t3.000\t0.000\t5.000\t-35.000
+1\t102\t2\t-900.000\t-15.000\t-3.000\t0.000\t10.000\t40.000
+1\t103\t1\t1800.000\t2.800\t1.400\t0.000\t3.000\t8.000
+1\t103\t2\t-1800.000\t-2.800\t-1.400\t0.000\t4.000\t6.000"""
+
+
 def val(x, d=0.0):
     try:
         x = float(x)
@@ -208,41 +218,62 @@ mode = st.radio("รูปแบบข้อมูลแรง", ["staad", "app"
                 format_func=lambda x: {"staad": "STAAD.Pro member end forces (แนะนำ)",
                                        "app": "ป้อน Mz / My เอง"}[x])
 if mode == "staad":
-    st.caption("วางค่าจากตาราง **Member End Forces** ของ STAAD ตามที่แสดง (แกน local, ไม่ต้องแก้เครื่องหมาย) · "
-               "P = Fx ที่ start node (บวก = อัด) · Mz คู่กับ Fy ใช้ความลึก YD · My คู่กับ Fz ใช้ความลึก ZD · "
-               "แรงกับ YD/ZD อยู่ในแกน local เดียวกันจึงจับคู่ตรง ไม่ขึ้นกับ beta · โมเมนต์ใช้ขนาด "
-               "ทิศการดัดตัดสินจาก |F|·L · ติ๊ก **แนวดิ่งล้วน** ให้ combo ที่มีแต่ D/L เพื่อตรวจเครื่องหมาย P")
+    st.markdown("**วิธีใช้:** ใน STAAD เปิดตาราง **Beam End Force** → เลือกแถวของเสาต้นนี้ "
+                "(ทุก L/C ทั้ง 2 node) → **Ctrl+C** → วางทับในช่องข้างล่าง (**Ctrl+V**) "
+                "ไม่ต้องแก้เครื่องหมายหรือหน่วย ถ้าคัดลอกหัวตารางมาด้วย แอปจะอ่านหน่วยให้เอง")
+    txt = st.text_area("ตาราง Beam End Force จาก STAAD (Beam, L/C, Node, Axial, Shear-Y, Shear-Z, "
+                       "Torsion, Moment-Y, Moment-Z)", STAAD_SAMPLE, height=230, key="c_staad_txt")
+    srows, fu_d, mu_d = C.parse_staad_end_forces(txt)
+    FU, MU = list(C.STAAD_FORCE_UNITS), list(C.STAAD_MOMENT_UNITS)
+    c1, c2, c3 = st.columns(3)
+    sfu = c1.selectbox("หน่วยแรง (Axial / Shear)", FU, FU.index(fu_d or "kN"), key=f"c_sfu_{fu_d}",
+                       help="ต้องตรงกับหัวตาราง STAAD เช่น kg = kgf")
+    smu = c2.selectbox("หน่วยโมเมนต์", MU, MU.index(mu_d or "kN-m"), key=f"c_smu_{mu_d}")
+    if fu_d and mu_d:
+        st.caption(f"อ่านหน่วยจากหัวตาราง: แรง **{fu_d}**, โมเมนต์ **{mu_d}**")
+    elif srows:
+        st.warning("ไม่พบหน่วยในข้อมูลที่วาง — เลือกหน่วยให้ตรงกับหัวตาราง STAAD "
+                   "(หน่วยผิด = ผลผิดหลายสิบเท่า)")
+    beams = list(dict.fromkeys(r["beam"] for r in srows))
+    if len(beams) > 1:
+        bsel = c3.selectbox("Beam (เสา)", beams, key="c_sbeam")
+        srows = [r for r in srows if r["beam"] == bsel]
+    nodes = list(dict.fromkeys(r["node"] for r in srows))
+    guess, sure = C.guess_start_node(srows)
+    if nodes:
+        snode = c3.selectbox("start node", nodes, nodes.index(guess) if guess in nodes else 0,
+                             key=f"c_snode_{'_'.join(nodes)}",
+                             help="แถวของ start node ใช้ Fx เป็น P (บวก = อัด) — แอปเดาจาก node ที่ Fx > 0")
+        if not sure:
+            st.warning("เดา start node ไม่ได้ชัด — ตรวจใน STAAD (Member Info / Incidences) แล้วเลือกเอง")
+    else:
+        snode = None
     flip = st.checkbox("กลับเครื่องหมาย P (ข้อมูลใช้ ลบ = อัด)", key="c_flip")
-    sdefault = pd.DataFrame([
-        {"Combo": "S1", "แนวดิ่งล้วน": False, "Fx_s": 1600.0, "Fy_s": -6.0, "Fz_s": 10.0,
-         "My_s": -20.0, "Mz_s": 60.0, "My_e": -30.0, "Mz_e": -90.0},
-        {"Combo": "LC2", "แนวดิ่งล้วน": False, "Fx_s": 900.0, "Fy_s": 15.0, "Fz_s": 3.0,
-         "My_s": 5.0, "Mz_s": -35.0, "My_e": 10.0, "Mz_e": 40.0},
-        {"Combo": "1.2D+1.6L", "แนวดิ่งล้วน": True, "Fx_s": 1800.0, "Fy_s": 2.8, "Fz_s": 1.4,
-         "My_s": 3.0, "Mz_s": 8.0, "My_e": 4.0, "Mz_e": 6.0},
-    ])
-    sraw = st.data_editor(
-        sdefault, num_rows="dynamic", width="stretch", key="c_staad",
-        column_config={
-            "Fx_s": num(f"Fx start ({fu})"), "Fy_s": num(f"Fy start ({fu})"),
-            "Fz_s": num(f"Fz start ({fu})"), "My_s": num(f"My start ({mu})"),
-            "Mz_s": num(f"Mz start ({mu})"), "My_e": num(f"My end ({mu})"),
-            "Mz_e": num(f"Mz end ({mu})"),
-            "แนวดิ่งล้วน": st.column_config.CheckboxColumn(help="combo ที่มีแต่ D, L (ใช้ตรวจเครื่องหมาย P)"),
-        })
+    lcs = list(dict.fromkeys(r["lc"] for r in srows))
+    c1, c2 = st.columns(2)
+    use = c1.multiselect("L/C ที่ใช้ออกแบบ (ควรเป็น combination ที่คูณ factor แล้ว)", lcs, lcs,
+                         key=f"c_suse_{len(lcs)}")
+    grav = c2.multiselect("L/C ที่มีแต่แรงแนวดิ่ง (D, L) — ใช้ตรวจเครื่องหมาย P", lcs,
+                          key=f"c_sgrav_{len(lcs)}")
+    pairs, perrs = C.pair_staad_rows([r for r in srows if r["lc"] in use], snode, flip)
+    for m in perrs:
+        st.error(m)
+    if not srows:
+        st.error("อ่านข้อมูลไม่ได้ — ต้องมี 9 คอลัมน์: Beam, L/C, Node, Axial, Shear-Y, Shear-Z, "
+                 "Torsion, Moment-Y, Moment-Z")
+    kF, kM = C.STAAD_FORCE_UNITS[sfu] / F, C.STAAD_MOMENT_UNITS[smu] / M   # → หน่วยที่แอปแสดง
     rows_in = []
-    for i, r in sraw.iterrows():
-        if pd.isna(r.get("Fx_s")):
-            continue
-        f = C.from_staad(val(r["Fx_s"]), val(r["Fy_s"]), val(r["Fz_s"]), val(r["My_s"]),
-                         val(r["Mz_s"]), val(r["My_e"]), val(r["Mz_e"]), flip)
-        rows_in.append((str(r.get("Combo") or f"#{i + 1}"), f, bool(r.get("แนวดิ่งล้วน")),
-                        "auto", "auto"))
-    with st.expander("ตรวจการแปลงค่า STAAD → ค่าที่ใช้คำนวณ", expanded=False):
-        st.dataframe(pd.DataFrame([{"Combo": n, f"Pu ({fu})": f["Pu"], f"|Mz| end ({mu})": f["Mxt"],
-                                    f"|Mz| start ({mu})": f["Mxb"], f"|My| end ({mu})": f["Myt"],
-                                    f"|My| start ({mu})": f["Myb"], f"|Fy| ({fu})": f["Vuy"],
-                                    f"|Fz| ({fu})": f["Vux"]} for n, f, *_ in rows_in]),
+    for lc, f in pairs:
+        f = {k: v * (kM if k[0] == "M" else kF) for k, v in f.items()}
+        rows_in.append((lc, f, lc in grav, "auto", "auto"))
+    st.caption("Mz คู่กับ Shear-Y ใช้ความลึก YD · My คู่กับ Shear-Z ใช้ความลึก ZD (แกน local เดียวกัน "
+               "ไม่ขึ้นกับ beta) · โมเมนต์ใช้ขนาด ทิศการดัดตัดสินจาก |F|·L")
+    with st.expander(f"ค่าที่ใช้คำนวณ (แปลงเป็น {fu}, {mu} แล้ว)", expanded=True):
+        st.dataframe(pd.DataFrame([{"L/C": n, f"P = Fx start ({fu})": f["Pu"],
+                                    f"|Mz| end ({mu})": f["Mxt"], f"|Mz| start ({mu})": f["Mxb"],
+                                    f"|My| end ({mu})": f["Myt"], f"|My| start ({mu})": f["Myb"],
+                                    f"|Fy| ({fu})": f["Vuy"], f"|Fz| ({fu})": f["Vux"]}
+                                   for n, f, *_ in rows_in]),
                      hide_index=True, width="stretch")
 else:
     st.caption("ชื่อแกนตาม STAAD · Mz ดัดรอบแกน z (ความลึก YD) คู่กับ Fy · My ดัดรอบแกน y (ความลึก ZD) "

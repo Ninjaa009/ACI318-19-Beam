@@ -117,3 +117,24 @@ def test_beta90_swaps_story_direction_only():
     after = [m.label for m in at.metric if m.label.startswith("ทิศ")]
     assert before == ["ทิศ X → ใช้กับ Mz", "ทิศ Z → ใช้กับ My"]
     assert after == ["ทิศ Z → ใช้กับ Mz", "ทิศ X → ใช้กับ My"]
+
+
+USER_STAAD = """Beam\tL/C\tNode\tAxial Force\tShear-Y\tShear-Z\tTorsion\tMoment-Y\tMoment-Z
+\t\t\tkg\tkg\tkg\tkN-m\tkN-m\tkN-m
+12\t102\t24\t-5708.917\t-890.992\t753.547\t0.009\t17.505\t20.958
+12\t101\t24\t-4601.253\t-686.815\t580.044\t0.005\t13.475\t16.155
+12\t102\t12\t7764.665\t890.992\t-753.547\t-0.009\t8.359\t9.624
+12\t101\t12\t6999.626\t686.815\t-580.044\t-0.005\t6.434\t7.419"""
+
+
+def test_paste_staad_table_with_mixed_units():
+    at = _column_page()
+    at.text_area(key="c_staad_txt").set_value(USER_STAAD).run()
+    at.number_input(key="c_L").set_value(3.5).run()
+    assert at.selectbox(key="c_sfu_kg").value == "kg" and at.selectbox(key="c_smu_kN-m").value == "kN-m"
+    assert at.selectbox(key="c_snode_24_12").value == "12"
+    df = at.dataframe[-1].value
+    assert df.iloc[0, 1] == pytest.approx(7764.665 * 9.80665e-3, rel=1e-6)   # 76.15 kN ไม่ใช่ 7764
+    assert df.iloc[0, 2] == pytest.approx(20.958)
+    next(b for b in at.button if b.label == "ตรวจสอบเสา").click().run()
+    assert not at.exception and not at.error

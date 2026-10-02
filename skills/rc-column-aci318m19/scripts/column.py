@@ -19,6 +19,7 @@
 """
 from dataclasses import dataclass, field
 import math
+import re
 
 ES = 200_000.0      # §20.2.2.2
 ECU = 0.003         # §22.2.2.1
@@ -627,6 +628,90 @@ def staad_sway_dir(global_dir, beta90=False):
     if beta90:
         g = "Z" if g == "X" else "X"
     return "y" if g == "X" else "x"
+
+
+# หน่วยที่ STAAD แสดงในหัวตาราง → ตัวคูณเป็น N และ N·mm
+STAAD_FORCE_UNITS = {"kN": 1e3, "kg": 9.80665, "kgf": 9.80665, "ton": 9806.65, "MTon": 9806.65,
+                     "N": 1.0, "kip": 4448.222}
+STAAD_MOMENT_UNITS = {"kN-m": 1e6, "kg-m": 9806.65, "kgf-m": 9806.65, "ton-m": 9.80665e6,
+                      "MTon-m": 9.80665e6, "N-m": 1e3, "N-mm": 1.0, "kip-ft": 1.3558179e6}
+
+
+def _num(t):
+    try:
+        return float(t.replace(",", ""))
+    except ValueError:
+        return None
+
+
+def parse_staad_end_forces(text):
+    """แยกตาราง Beam End Force ที่คัดลอกจาก STAAD (Ctrl+C แล้ววาง)
+
+    แต่ละแถว: Beam, L/C, Node, Axial Force, Shear-Y, Shear-Z, Torsion, Moment-Y, Moment-Z
+    (L/C อาจมีชื่อต่อท้ายได้) — แถวหัวตารางถูกข้าม แต่ถ้ามีหน่วย (เช่น kg, kN-m) จะอ่านไว้
+    คืน (rows, force_unit หรือ None, moment_unit หรือ None)
+    rows: list ของ dict beam, lc, node, fx, fy, fz, mx, my, mz (หน่วยตามตาราง)
+    """
+    rows, fu, mu = [], None, None
+    flo = {k.lower(): k for k in STAAD_FORCE_UNITS}
+    mlo = {k.lower(): k for k in STAAD_MOMENT_UNITS}
+    for line in str(text).splitlines():
+        tok = [t for t in re.split(r"\t|\s{2,}|\s(?=-?\d)", line.strip()) if t.strip()]
+        tok = [t.strip() for t in tok]
+        if not tok:
+            continue
+        nums = [_num(t) for t in tok]
+        if len(tok) >= 9 and all(v is not None for v in nums[-7:]) and nums[0] is not None:
+            rows.append(dict(beam=str(tok[0]).split(".")[0], lc=" ".join(tok[1:-7]),
+                             node=str(tok[-7]).split(".")[0], fx=nums[-6], fy=nums[-5], fz=nums[-4],
+                             mx=nums[-3], my=nums[-2], mz=nums[-1]))
+            continue
+        for t in line.split():                      # แถวหัวตาราง: เก็บหน่วยตัวแรกที่เจอ
+            t = t.strip().lower()
+            if fu is None and t in flo:
+                fu = flo[t]
+            elif mu is None and t in mlo:
+                mu = mlo[t]
+    return rows, fu, mu
+
+
+def guess_start_node(rows):
+    """เดา start node ของ member: ที่ start node ของ STAAD Fx บวก = อัด ส่วน end node กลับเครื่องหมาย
+    เสาที่รับแรงอัดเป็นหลักจึงมี Fx > 0 ที่ start node เกือบทุก L/C → เลือก node ที่ Fx > 0 บ่อยที่สุด
+    คืน (node, มั่นใจหรือไม่) — ไม่มั่นใจเมื่อคะแนนเท่ากัน (ให้ผู้ใช้เลือกเอง)
+    """
+    score = {}
+    for r in rows:
+        score[r["node"]] = score.get(r["node"], 0) + (1 if r["fx"] > 0 else -1)
+    if not score:
+        return None, False
+    ranked = sorted(score.items(), key=lambda kv: -kv[1])
+    sure = len(ranked) == 2 and ranked[0][1] > ranked[1][1]
+    return ranked[0][0], sure
+
+
+def pair_staad_rows(rows, start_node, flip_axial=False):
+    """จับคู่แถว start/end ของแต่ละ L/C (member เดียว) แล้วแปลงด้วย from_staad
+    คืน (list ของ (lc, forces), ข้อความผิดพลาด) — L/C ที่ไม่มีครบ 2 node ถูกตัดออกพร้อมแจ้ง
+    """
+    by_lc, order, errs = {}, [], []
+    for r in rows:
+        if r["lc"] not in by_lc:
+            by_lc[r["lc"]] = {}
+            order.append(r["lc"])
+        by_lc[r["lc"]][r["node"]] = r
+    out = []
+    for lc in order:
+        d = by_lc[lc]
+        if start_node not in d or len(d) != 2:
+            errs.append(f"L/C {lc}: ต้องมี 2 แถว (start node {start_node} และ end node) — พบ node "
+                        f"{', '.join(d)}")
+            continue
+        s = d[start_node]
+        e = next(v for k, v in d.items() if k != start_node)
+        out.append((lc, from_staad(s["fx"], s["fy"], s["fz"], s["my"], s["mz"], e["my"], e["mz"],
+                                   flip_axial)))
+    return out, errs
 
 
 def check_axial_sign(rows):
