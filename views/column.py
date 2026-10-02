@@ -253,10 +253,14 @@ if mode == "staad":
     pairs, perrs = C.pair_staad_rows([r for r in srows if r["lc"] in use], snode, flip)
     for m in perrs:
         st.error(m)
-    # หน่วย: อ่านจากหัวตาราง ถ้าไม่มีให้เดาจากสมดุล |F|·L = |Mt| ± |Mb| (ต้องใส่ความยาวเสาให้ถูก)
+    # หน่วย: อ่านจากหัวตาราง > ปุ่มแนะนำ > เดาจากสมดุล |F|·L = |Mt| ± |Mb| > ให้ผู้ใช้เลือก
     fits = C.staad_units_from_statics(pairs, L) if pairs else []
+    pick = st.session_state.get("c_upick")
+    pick = pick[:2] if pick and pick[2] == hash(txt) else None      # ใช้เฉพาะกับข้อมูลชุดเดิม
     if fu_d and mu_d:
         dfu, dmu, how = fu_d, mu_d, "อ่านจากหัวตาราง"
+    elif pick:
+        (dfu, dmu), how = pick, "ตามที่เลือกจากคำแนะนำ"
     elif len(fits) == 1:
         (dfu, dmu), how = fits[0], f"เดาจากสมดุลแรงเฉือน–โมเมนต์ (L = {L / 1e3:.2f} m)"
     else:
@@ -268,15 +272,35 @@ if mode == "staad":
     smu = c2.selectbox("หน่วยโมเมนต์", MU, MU.index(dmu) if dmu else None, key=f"c_smu_{dmu}",
                        placeholder="เลือกหน่วยโมเมนต์")
     if how:
-        st.caption(f"หน่วย {how}: แรง **{dfu}**, โมเมนต์ **{dmu}** — ตรวจให้ตรงกับหัวตาราง STAAD")
+        st.caption(f"หน่วย{how}: แรง **{dfu}**, โมเมนต์ **{dmu}** — ตรวจให้ตรงกับหัวตาราง STAAD")
     elif srows:
-        st.warning("ไม่พบหน่วยในข้อมูลที่วาง — เลือกหน่วยให้ตรงกับหัวตาราง STAAD (หน่วยผิด = ผลผิดหลายสิบเท่า)"
-                   + (f" · หน่วยที่เข้ากับสมดุลของเสา: {', '.join(f'{a} + {b}' for a, b in fits)}"
-                      if fits else " · ไม่มีคู่หน่วยไหนเข้ากับสมดุล ตรวจความยาวเสา c/c ในแถบข้างด้วย"))
+        st.warning("ไม่พบหน่วยในข้อมูลที่วาง — เลือกหน่วยให้ตรงกับหัวตาราง STAAD (หน่วยผิด = ผลผิดหลายสิบเท่า)")
     units_ok = bool(sfu and smu)
-    if units_ok and fits and (sfu, smu) not in fits and pairs:
-        st.warning(f"หน่วย {sfu} + {smu} ไม่เข้ากับสมดุลแรงเฉือน–โมเมนต์ของเสา (L = {L / 1e3:.2f} m) — "
-                   f"ที่เข้ากันคือ {', '.join(f'{a} + {b}' for a, b in fits)}")
+    # ด่านตรวจสมดุล: หน่วยหรือความยาวเสาผิด → หยุดที่นี่ที่เดียว พร้อมคำแนะนำ
+    if units_ok and pairs:
+        bad = C.staad_statics_errors(pairs, sfu, smu, L)
+        if bad:
+            units_ok = False
+            Lneed = C.staad_member_length(pairs, sfu, smu)
+            st.error(f"**ข้อมูลไม่สมดุล** เมื่อใช้หน่วย {sfu} + {smu} และเสายาว {L / 1e3:.2f} m: "
+                     f"แรงเฉือน × ความยาว ไม่เท่ากับโมเมนต์หัว+ตีนเสา ({len(bad)} รายการ) "
+                     "→ หน่วยหรือความยาวเสา (แถบข้าง: ความยาวชิ้นส่วน c/c) ไม่ตรงกับโมเดล"
+                     + (f" · ถ้าหน่วยนี้ถูก เสาต้องยาว {Lneed / 1e3:.3f} m" if Lneed else ""))
+            with st.expander("ดูรายการที่ไม่สมดุล"):
+                st.dataframe(pd.DataFrame(bad, columns=["L/C", "แกน", "|F| (kN)", "(|Mt|+|Mb|)/L (kN)"]),
+                             hide_index=True)
+            sug = C.staad_suggest(pairs)
+            if sug:
+                st.markdown("**ค่าที่ทำให้ข้อมูลสมดุล (เสาดัดโค้งสองทาง)** — กดเพื่อใช้ หรือแก้เองในแถบข้าง:")
+
+                def _apply(fu_, mu_, L_):
+                    st.session_state["c_upick"] = (fu_, mu_, hash(txt))
+                    st.session_state["c_L"] = round(L_ / 1e3, 2)
+                for fu_, mu_, L_ in sug:
+                    st.button(f"ใช้หน่วย {fu_} + {mu_} และความยาวเสา {L_ / 1e3:.2f} m", key=f"c_sug_{fu_}_{mu_}",
+                              on_click=_apply, args=(fu_, mu_, L_))
+            else:
+                st.info("หาหน่วย/ความยาวที่สมดุลไม่ได้ — อาจมีแรงกระทำกลางเสา หรือเลือก start node / beam ผิด")
     rows_in = []
     if units_ok:
         kF, kM = C.STAAD_FORCE_UNITS[sfu] / F, C.STAAD_MOMENT_UNITS[smu] / M   # → หน่วยที่แอปแสดง
@@ -285,13 +309,14 @@ if mode == "staad":
             rows_in.append((lc, f, lc in grav, "auto", "auto"))
     st.caption("Mz คู่กับ Shear-Y ใช้ความลึก YD · My คู่กับ Shear-Z ใช้ความลึก ZD (แกน local เดียวกัน "
                "ไม่ขึ้นกับ beta) · โมเมนต์ใช้ขนาด ทิศการดัดตัดสินจาก |F|·L")
-    with st.expander(f"ค่าที่ใช้คำนวณ (แปลงเป็น {fu}, {mu} แล้ว)", expanded=True):
-        st.dataframe(pd.DataFrame([{"L/C": n, f"P = Fx start ({fu})": f["Pu"],
-                                    f"|Mz| end ({mu})": f["Mxt"], f"|Mz| start ({mu})": f["Mxb"],
-                                    f"|My| end ({mu})": f["Myt"], f"|My| start ({mu})": f["Myb"],
-                                    f"|Fy| ({fu})": f["Vuy"], f"|Fz| ({fu})": f["Vux"]}
-                                   for n, f, *_ in rows_in]),
-                     hide_index=True, width="stretch")
+    if rows_in:
+        with st.expander(f"ค่าที่ใช้คำนวณ (แปลงเป็น {fu}, {mu} แล้ว)", expanded=True):
+            st.dataframe(pd.DataFrame([{"L/C": n, f"P = Fx start ({fu})": f["Pu"],
+                                        f"|Mz| end ({mu})": f["Mxt"], f"|Mz| start ({mu})": f["Mxb"],
+                                        f"|My| end ({mu})": f["Myt"], f"|My| start ({mu})": f["Myb"],
+                                        f"|Fy| ({fu})": f["Vuy"], f"|Fz| ({fu})": f["Vux"]}
+                                       for n, f, *_ in rows_in]),
+                         hide_index=True, width="stretch")
 else:
     st.caption("ชื่อแกนตาม STAAD · Mz ดัดรอบแกน z (ความลึก YD) คู่กับ Fy · My ดัดรอบแกน y (ความลึก ZD) "
                "คู่กับ Fz · P > 0 = อัด · ทิศการดัด auto = ตัดสินจาก |F|·L")

@@ -168,3 +168,21 @@ def test_paste_without_header_and_wrong_length_requires_units():
     at.text_area(key="c_staad_txt").set_value(B11).run()          # L = 5 m ไม่ตรงโมเดล
     assert at.selectbox(key="c_sfu_None").value is None
     assert next(b for b in at.button if b.label == "ตรวจสอบเสา").disabled
+
+
+def test_wrong_units_show_one_error_and_fix_button():
+    """เคสที่ผู้ใช้เจอ: L = 5 m (ค่าเริ่มต้น) แล้วเลือก kg + kg-m เอง → ต้องหยุดที่ด่านเดียว พร้อมปุ่มแก้"""
+    at = _column_page()
+    at.text_area(key="c_staad_txt").set_value(B11).run()
+    at.selectbox(key="c_sfu_None").set_value("kg").run()
+    at.selectbox(key="c_smu_None").set_value("kg-m").run()
+    errs = [e.value for e in at.error]
+    assert len(errs) == 1 and "ไม่สมดุล" in errs[0]
+    assert next(b for b in at.button if b.label == "ตรวจสอบเสา").disabled
+    fix = next(b for b in at.button if "kg + kN-m" in b.label and "3.50 m" in b.label)
+    fix.click().run()
+    assert at.number_input(key="c_L").value == pytest.approx(3.5)
+    assert not at.error
+    assert at.selectbox(key="c_sfu_kg").value == "kg" and at.selectbox(key="c_smu_kN-m").value == "kN-m"
+    next(b for b in at.button if b.label == "ตรวจสอบเสา").click().run()
+    assert not at.exception and not at.error

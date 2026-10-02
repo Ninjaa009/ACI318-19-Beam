@@ -312,13 +312,18 @@ def run():
     rows2, _, _ = C.parse_staad_end_forces("12 101 24 -4601.253 -686.815 580.044 0.005 13.475 16.155")
     _, errs = C.pair_staad_rows(rows2, "12")
     check_true("C12", "L/C ที่มีแถวเดียว → แจ้งผิดพลาด", len(errs) == 1)
-    check_true("C12", "ไม่มีหัวตาราง: เดาหน่วยจากสมดุล → kg + kN-m (L = 3.5 m)",
+    check_true("C12", "ไม่มีหัวตาราง: เดาหน่วยจากสมดุล (L = 3.5 m) → kg + kN-m",
                C.staad_units_from_statics(pairs, 3500) == [("kg", "kN-m")])
     check_true("C12", "L ผิด (5 m) → ไม่มีคู่หน่วยที่เข้ากัน", C.staad_units_from_statics(pairs, 5000) == [])
+    sug = C.staad_suggest(pairs)
+    check_true("C12", "แนะนำ: kg + kN-m → เสายาว 3.50 m (โค้งสองทาง)",
+               any(a == "kg" and b == "kN-m" and abs(c - 3500) < 5 for a, b, c in sug))
+    check_true("C12", "เลือก kg + kg-m (ผิด) → สมดุลต้องการเสายาวแค่ 34 mm และทุก L/C ไม่ผ่าน",
+               abs(C.staad_member_length(pairs, "kg", "kg-m") - 34.3) < 0.5
+               and len(C.staad_statics_errors(pairs, "kg", "kg-m", 3500)) >= 2)
     r1, _, _ = C.parse_staad_end_forces("1 101 1 1600 -6 10 0 -20 60\n1 101 2 -1600 6 -10 0 -30 -90")
-    check_true("C12", "kN/kN-m แยกจาก kg/kg-m ด้วยสมดุลไม่ได้ → ให้ผู้ใช้เลือก",
-               ("kN", "kN-m") in C.staad_units_from_statics(C.pair_staad_rows(r1, "1")[0], 5000)
-               and len(C.staad_units_from_statics(C.pair_staad_rows(r1, "1")[0], 5000)) > 1)
+    g1 = C.staad_units_from_statics(C.pair_staad_rows(r1, "1")[0], 5000)
+    check_true("C12", "kN/kN-m แยกจาก kg/kg-m ด้วยสมดุลไม่ได้ → ให้ผู้ใช้เลือก", ("kN", "kN-m") in g1 and len(g1) > 1)
     rows3, _, _ = C.parse_staad_end_forces("5   101 1.2D+1.6L   3   100   1   2   0   3   4")
     check_true("C12", "L/C มีชื่อต่อท้าย", rows3 and rows3[0]["lc"] == "101 1.2D+1.6L" and rows3[0]["node"] == "3")
     return ROWS

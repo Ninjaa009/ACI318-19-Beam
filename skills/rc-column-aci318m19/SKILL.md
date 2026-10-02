@@ -69,7 +69,7 @@ description: ออกแบบและตรวจสอบเสา คสล
   `STAAD_AXIS = {"x": "z", "y": "y"}` ใช้แปลงชื่อแกนภายใน → ชื่อ STAAD
 - `from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, flip_axial)`: แปลง Member End Forces (แกน local) ตามตารางข้างบน — **ไม่ขึ้นกับ beta** เพราะแรงและ YD/ZD อยู่ในแกน local เดียวกัน
 - `staad_sway_dir(global_dir, beta90)`: beta มีผลเฉพาะการจับคู่ทิศ Q ของชั้น (แกนโลก) กับแกน local — beta 0: เซทิศโลก X → Mz (ภายใน "y"), ทิศ Z → My (ภายใน "x"); beta 90 สลับกัน ⚠️ ยืนยันกับโมเดลจริงเสมอ (beta angle, start node อยู่ล่างหรือบน)
-- **วางตาราง Beam End Force ทั้งก้อน:** `parse_staad_end_forces(text)` อ่านแถว Beam, L/C, Node, Axial, Shear-Y, Shear-Z, Torsion, Moment-Y, Moment-Z (+ หน่วยจากหัวตาราง เช่น kg / kN-m — STAAD มักแสดงแรงกับโมเมนต์คนละหน่วย ต้องแปลงด้วย `STAAD_FORCE_UNITS` / `STAAD_MOMENT_UNITS` ก่อนใช้), `guess_start_node(rows)` เดา start node จาก Fx > 0, `pair_staad_rows(rows, start_node)` จับคู่แถว start/end ต่อ L/C แล้วเรียก `from_staad`; ถ้าคัดลอกมาไม่มีหัวตาราง `staad_units_from_statics(pairs, L)` หาคู่หน่วยที่ทำให้ |F|·L = |Mt| ± |Mb| (ได้คู่เดียว → ใช้ได้, หลายคู่หรือไม่มี → ให้ผู้ใช้เลือกหน่วยและตรวจ L)
+- **วางตาราง Beam End Force ทั้งก้อน:** `parse_staad_end_forces(text)` อ่านแถว Beam, L/C, Node, Axial, Shear-Y, Shear-Z, Torsion, Moment-Y, Moment-Z (+ หน่วยจากหัวตาราง เช่น kg / kN-m — STAAD มักแสดงแรงกับโมเมนต์คนละหน่วย ต้องแปลงด้วย `STAAD_FORCE_UNITS` / `STAAD_MOMENT_UNITS` ก่อนใช้), `guess_start_node(rows)` เดา start node จาก Fx > 0, `pair_staad_rows(rows, start_node)` จับคู่แถว start/end ต่อ L/C แล้วเรียก `from_staad`; ถ้าคัดลอกมาไม่มีหัวตาราง `staad_units_from_statics(pairs, L)` หาคู่หน่วยที่ทำให้ |F|·L = |Mt| ± |Mb|; `staad_statics_errors(pairs, fu, mu, L)` เป็นด่านตรวจหน่วย/ความยาวก่อนออกแบบ (หน่วยหรือ L ผิด → หยุดที่เดียว); `staad_suggest(pairs)` แนะนำคู่หน่วยกับความยาวเสาที่สมดุล (โค้งสองทาง, 1.5–15 m)
 - `check_axial_sign(rows)`: **combo แนวดิ่งล้วน (D, L) ต้องได้ P > 0** ไม่เช่นนั้นหยุด (เครื่องหมาย P น่าจะกลับ เช่น อ่าน Fx ที่ end node) — ให้ผู้ใช้ระบุอย่างน้อย 1 combo แนวดิ่ง
 - `curvature_ratio` ต้องได้ |V|·L ตรงกับ |Mt|+|Mb| หรือ ||Mt|−|Mb|| ภายใน 10% (`CURV_TOL`) ไม่เช่นนั้น **แจ้งให้ระบุ single/double เอง** — ใช้จับการจับคู่ V↔M ผิดแกน หรือมีแรงกระทำระหว่างช่วง
 - เสาไม่จัตุรัส (b ≠ h): ต้องยืนยันว่า h = YD และ b = ZD ก่อนคำนวณ (สลับด้านแล้วความจุผิด)
@@ -147,7 +147,7 @@ description: ออกแบบและตรวจสอบเสา คสล
 
 ## 10. การตรวจสอบความถูกต้อง
 
-`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 104/104** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C9 จำแนก sway/non-sway ตาราง Q ของ RCDC 6 แถว, C10 ด่านบังคับ non-sway, C11 sign convention/STAAD, C12 วางตาราง Beam End Force + หน่วยผสม)
+`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 106/106** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C9 จำแนก sway/non-sway ตาราง Q ของ RCDC 6 แถว, C10 ด่านบังคับ non-sway, C11 sign convention/STAAD, C12 วางตาราง Beam End Force + หน่วยผสม)
 
 - ตรงกับ RCDC: φPn,max 1,232.14 kN; φMcap แกนเดียว 54.22 vs 54.16 kN·m; φVc 50.79/52.28 kN; φVs 107.37 kN; Q 0.011
 - **ยังไม่ทราบสาเหตุ:** φMcap สองแกน (มุม 33.1°) solver 54.26 vs RCDC 53.66 kN·m (RCDC ต่ำกว่า 1.1%)

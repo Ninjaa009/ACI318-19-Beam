@@ -727,21 +727,55 @@ def staad_units_from_statics(pairs, L):
     แต่แยก kN/kN-m กับ kg/kg-m ไม่ได้ → ถ้าได้หลายคู่ ผู้ใช้ต้องเลือกเอง
     คืน list ของคู่หน่วยที่ผ่าน (ว่าง = ไม่มีคู่ไหนผ่าน: ตรวจ L หรือมีแรงกระทำกลางเสา)
     """
-    ok = []
+    return [(fu, mu) for fu, mu in STAAD_UNIT_PAIRS if not staad_statics_errors(pairs, fu, mu, L)]
+
+
+def staad_statics_errors(pairs, fu, mu, L):
+    """L/C ที่สมดุล |F|·L ≈ |Mt| ± |Mb| ไม่เป็นจริงเมื่อใช้หน่วย (fu, mu) และความยาว L (mm)
+    ข้ามแกนที่โมเมนต์ < 5% ของค่าสูงสุดในชุดข้อมูล — คืน list ของ (L/C, แกน, |F| kN, (|Mt|+|Mb|)/L kN)
+    """
+    kf, km = STAAD_FORCE_UNITS[fu], STAAD_MOMENT_UNITS[mu]
+    axes = [(lc, ax, Mt, Mb, V) for lc, f in pairs
+            for ax, Mt, Mb, V in (("Mz/Fy", f["Mxt"], f["Mxb"], f["Vuy"]), ("My/Fz", f["Myt"], f["Myb"], f["Vux"]))]
+    big = max((Mt + Mb for *_, Mt, Mb, V in axes), default=0.0)
+    if big <= 0:
+        return []
+    bad = []
+    for lc, ax, Mt, Mb, V in axes:
+            if Mt + Mb >= 0.05 * big:          # ข้ามแกนที่โมเมนต์เล็กมากเทียบกับข้อมูลชุดนี้ (เศษตัวเลข)
+                try:
+                    curvature_ratio(Mt * km, Mb * km, V=V * kf, L=L)
+                except ValueError:
+                    bad.append((lc, ax, V * kf / 1e3, (Mt + Mb) * km / L / 1e3))
+    return bad
+
+
+def staad_member_length(pairs, fu, mu, tol=CURV_TOL):
+    """ความยาวเสา (mm) ที่ทำให้ |F|·L = |Mt| + |Mb| (โค้งสองทาง ซึ่งเป็นกรณีปกติของเสาในโครงข้อแข็ง)
+    ตรงกันทุก L/C เมื่อใช้หน่วย (fu, mu) — ใช้แนะนำผู้ใช้เมื่อ L หรือหน่วยไม่เข้ากับข้อมูล
+    แต่ละ L/C ใช้แกนที่โมเมนต์ใหญ่กว่า คืน L (mm) หรือ None ถ้าไม่ตรงกันทุก L/C
+    """
+    kf, km = STAAD_FORCE_UNITS[fu], STAAD_MOMENT_UNITS[mu]
+    Ls = []
+    for _, f in pairs:
+        Mt, Mb, V = max(((f["Mxt"], f["Mxb"], f["Vuy"]), (f["Myt"], f["Myb"], f["Vux"])),
+                        key=lambda t: t[0] + t[1])
+        if V > 0 and Mt + Mb > 0:
+            Ls.append((Mt + Mb) * km / (V * kf))
+    if not Ls:
+        return None
+    Lm = sorted(Ls)[len(Ls) // 2]
+    return Lm if all(abs(x - Lm) <= tol * Lm for x in Ls) else None
+
+
+def staad_suggest(pairs, L_range=(1500.0, 15000.0)):
+    """คู่หน่วยที่ทำให้เสามีความยาวสมจริง (โค้งสองทาง) → list ของ (fu, mu, L_mm) ใช้เป็นคำแนะนำ"""
+    out = []
     for fu, mu in STAAD_UNIT_PAIRS:
-        kf, km = STAAD_FORCE_UNITS[fu], STAAD_MOMENT_UNITS[mu]
-        n = 0
-        try:
-            for _, f in pairs:
-                for Mt, Mb, V in ((f["Mxt"], f["Mxb"], f["Vuy"]), (f["Myt"], f["Myb"], f["Vux"])):
-                    if max(Mt, Mb) * km > 1e5:          # ข้ามแกนที่โมเมนต์เล็กมาก (< 0.1 kN·m)
-                        curvature_ratio(Mt * km, Mb * km, V=V * kf, L=L)
-                        n += 1
-        except ValueError:
-            continue
-        if n:
-            ok.append((fu, mu))
-    return ok
+        Ls = staad_member_length(pairs, fu, mu)
+        if Ls and L_range[0] <= Ls <= L_range[1]:
+            out.append((fu, mu, Ls))
+    return out
 
 
 def check_axial_sign(rows):
