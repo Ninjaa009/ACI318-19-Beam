@@ -24,6 +24,15 @@ def _read(up):
     return raw.decode("latin-1", "replace")
 
 
+def _anl_uploader(label, key):
+    """อัปโหลด .anl (แสดงเฉพาะเมื่อขั้นที่ 1 ยังไม่ได้ให้ .anl มา) — คืนข้อความไฟล์ หรือ None"""
+    up_ = st.file_uploader(label, type=["anl", "txt"], key=key)
+    if up_ is not None and st.session_state.get("anl_name") != up_.name + str(up_.size):
+        st.session_state.anl_text = _read(up_)
+        st.session_state.anl_name = up_.name + str(up_.size)
+    return st.session_state.get("anl_text")
+
+
 # ---------------------------------------------------------------- ขั้นที่ 1
 st.header("ขั้นที่ 1 · Geometry และน้ำหนักบรรทุก (.std)")
 c1, c2 = st.columns([3, 1])
@@ -127,16 +136,15 @@ anl_text = st.session_state.get("anl_text")
 if src2 == "table":
     st.caption("ใน STAAD (หน้า Postprocessing) เปิดตาราง **Beam End Force** → คลิกมุมซ้ายบนของตารางเพื่อเลือกทั้งหมด → "
                "**Ctrl+C** → วางข้างล่าง · ต้องติดแถวหัวตาราง (มีหน่วย เช่น kg, kN-m) มาด้วย · "
-               "แถวที่เว้น Beam / L/C ว่างไว้ แอปเติมจากแถวบนให้เอง")
+               "แถวที่เว้น Beam / L/C ว่างไว้ แอปเติมจากแถวบนให้เอง · **วางทั้งตารางครั้งเดียว ใช้ได้ทั้งหน้าเสาและหน้าคาน** "
+               "(แต่ละ L/C มี 2 แถว = ปลาย start กับปลาย end ของ member ไม่ใช่ข้อมูลซ้ำ)")
     tbl = st.text_area("ตาราง Beam End Force (ทุก member)", height=180, key="sm_table",
                        placeholder="Beam\tL/C\tNode\tAxial Force kg\tShear-Y kg\t...")
-    up3 = st.file_uploader("ไฟล์ .anl (ไม่บังคับ — ใช้หา load บนคาน สำหรับออกแบบคาน และตรวจน้ำหนักรวม)",
-                           type=["anl", "txt"], key="sm_anl2")
-    if up3 is not None and st.session_state.get("anl_name") != up3.name + str(up3.size):
-        st.session_state.anl_text = anl_text = _read(up3)
-        st.session_state.anl_name = up3.name + str(up3.size)
-    if anl_text:
-        st.caption("มีไฟล์ .anl แล้ว — ใช้ตรวจน้ำหนักรวม และหา load บนคาน (MEMBER LOAD) สำหรับหน้าออกแบบคาน")
+    if anl_text:        # มี .anl จากขั้นที่ 1 แล้ว — ไม่ต้องขออัปโหลดซ้ำ
+        st.caption("✓ ใช้ไฟล์ .anl ที่มีอยู่แล้ว (ตรวจน้ำหนักรวม + load บนคานสำหรับหน้าออกแบบคาน) — ไม่ต้องอัปโหลดซ้ำ")
+    else:
+        anl_text = _anl_uploader("ไฟล์ .anl (ไม่บังคับ — ใช้หา load บนคาน สำหรับออกแบบคาน และตรวจน้ำหนักรวม)",
+                                 "sm_anl2") or None
     if not tbl.strip():
         st.info("วางตารางเพื่อไปขั้นที่ 3")
         st.session_state.pop("staad_forces", None)
@@ -154,11 +162,11 @@ if src2 == "table":
 else:
     st.caption("ไฟล์ .anl ต้องมีตาราง MEMBER END FORCES — ในไฟล์ .std ต้องมีบรรทัด `PRINT MEMBER FORCES` ต่อจาก "
                "`PERFORM ANALYSIS` (`PRINT ALL` อย่างเดียวไม่พิมพ์แรงใน member) · หน่วยอ่านจากบรรทัด `ALL UNITS ARE` · "
-               "ถ้าอัปโหลด .anl ไว้ในขั้นที่ 1 แล้วไม่ต้องอัปโหลดซ้ำ")
-    up2 = st.file_uploader("ไฟล์ผลวิเคราะห์ (.anl)", type=["anl", "txt"], key="sm_anl")
-    if up2 is not None and st.session_state.get("anl_name") != up2.name + str(up2.size):
-        st.session_state.anl_text = anl_text = _read(up2)
-        st.session_state.anl_name = up2.name + str(up2.size)
+               "ไฟล์เดียวใช้ได้ทั้งเสาและคาน")
+    if anl_text:
+        st.caption("✓ ใช้ไฟล์ .anl จากขั้นที่ 1 — ไม่ต้องอัปโหลดซ้ำ")
+    else:
+        anl_text = _anl_uploader("ไฟล์ผลวิเคราะห์ (.anl)", "sm_anl")
     if not anl_text:
         st.info("อัปโหลดไฟล์ .anl เพื่อไปขั้นที่ 3")
         st.session_state.pop("staad_forces", None)
