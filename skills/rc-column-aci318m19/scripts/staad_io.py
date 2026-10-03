@@ -494,6 +494,50 @@ def parse_anl(text):
     return out
 
 
+def forces_from_table(text, parse_table, force_units, moment_units, fu=None, mu=None):
+    """ตาราง Beam End Force ที่คัดลอกจากหน้าจอ STAAD (ทุก member) → Forces เหมือนอ่านจาก .anl
+
+    parse_table / force_units / moment_units = column.parse_staad_end_forces, STAAD_FORCE_UNITS,
+    STAAD_MOMENT_UNITS (ส่งเข้ามาเพื่อไม่ให้ staad_io ผูกกับ column.py)
+    หน่วยอ่านจากหัวตาราง (เช่น "Axial Force kg", "Moment-Y kN-m") หรือส่ง fu / mu เอง — ไม่มีหน่วย → ValueError
+    """
+    rows, fu_d, mu_d = parse_table(text)
+    fu, mu = fu or fu_d, mu or mu_d
+    if rows and not (fu and mu):
+        raise ValueError("ไม่พบหน่วยในหัวตาราง — คัดลอกตาราง Beam End Force พร้อมแถวหัวตาราง (มี kg / kN-m ฯลฯ)")
+    out = Forces()
+    if not rows:
+        return out
+    kf, km = force_units[fu], moment_units[mu]
+    for r in rows:
+        try:
+            m, lc, j = int(r["beam"]), int(str(r["lc"]).split()[0]), int(r["node"])
+        except ValueError:
+            continue
+        out.data.setdefault((m, lc), {})[j] = (r["fx"] * kf, r["fy"] * kf, r["fz"] * kf,
+                                                r["mx"] * km, r["my"] * km, r["mz"] * km)
+    out.units = [f"{fu}, {mu} (ตาราง Beam End Force)"]
+    out.tables = 1
+    return out
+
+
+def base_reactions(model, forces, load):
+    """ΣFx ที่ joint ฐานรองรับของเสาทุกต้น (N) — เทียบกับน้ำหนักแนวดิ่งรวมของ load เพื่อตรวจว่าแรงครบทุกเสา
+    คืน (ผลรวม, จำนวนเสาที่มีข้อมูล, จำนวนเสาที่ต่อกับฐานรองรับ)"""
+    tot, n, nsup = 0.0, 0, 0
+    for m in model.columns():
+        lo, _ = model.bottom_top(m)
+        if lo not in model.supports:
+            continue
+        nsup += 1
+        d = forces.data.get((m, load))
+        if d and lo in d:
+            f = d[lo][0] if model.members[m][0] == lo else -d[lo][0]   # แรงอัดที่ฐาน (บวก)
+            tot += f
+            n += 1
+    return tot, n, nsup
+
+
 def column_forces(model, forces, member, load, from_staad):
     """แรงของเสาใน load หนึ่ง → dict ของ from_staad (P = Fx ที่ start node ตาม incidences)"""
     a, b = model.members[member]

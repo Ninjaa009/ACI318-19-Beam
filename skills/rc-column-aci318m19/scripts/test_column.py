@@ -300,6 +300,15 @@ def run():
     for lid, exp in ((1, -507.60), (2, -432.00), (3, -294.20)):
         check("C13", f"LOAD {lid}: ΣFy จาก .anl จริง (kN)", tot[lid][1] / 1e3, exp, 1e-9)
         check("C13", f"LOAD {lid}: ΣFy ที่คำนวณจาก .std (kN) เทียบ STAAD", Mo.vertical_total(lid)[0] / 1e3, exp, 0.01)
+    Ft = SIO.forces_from_table((ex / "frame_3x2_beam_end_force.txt").read_text(), C.parse_staad_end_forces,
+                               C.STAAD_FORCE_UNITS, C.STAAD_MOMENT_UNITS)
+    check_true("C13", "ตาราง Beam End Force จริง (Beam/L/C เว้นว่าง, kg + kN-m): member 1–13, load 1–3, 101–103",
+               Ft.members() == list(range(1, 14)) and Ft.loads() == [1, 2, 3, 101, 102, 103])
+    check_true("C13", "ตารางจริง: สมดุลเสาทั้ง 12 ต้น × 6 load ด้วย L จาก geometry",
+               all(SIO.check_equilibrium(Mo, Ft, m, lc)[0] for m in Mo.columns() for lc in Ft.loads()))
+    for lid, exp in ((1, 507.60), (2, 432.00), (3, 294.20), (101, 1315.44), (102, 1598.24)):
+        check("C13", f"ตารางจริง: Σ แรงอัดฐานเสา 12 ต้น load {lid} = น้ำหนักรวม (kN)",
+              SIO.base_reactions(Mo, Ft, lid)[0] / 1e3, exp, 0.02)
     check_true("C13", ".anl จริงที่ใช้ PRINT ALL อย่างเดียว: ไม่มีตาราง MEMBER END FORCES → ว่าง (แอปแนะนำ PRINT MEMBER FORCES)",
                not SIO.parse_anl(real).data)
     try:

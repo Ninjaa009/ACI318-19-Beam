@@ -523,18 +523,38 @@ def parse_staad_end_forces(text):
     rows, fu, mu = [], None, None
     flo = {k.lower(): k for k in STAAD_FORCE_UNITS}
     mlo = {k.lower(): k for k in STAAD_MOMENT_UNITS}
+    beam = lc = None                                  # ตารางแบบกลุ่ม: Beam / L/C พิมพ์แค่แถวแรกของกลุ่ม
     for line in str(text).splitlines():
-        tok = [t for t in re.split(r"\t|\s{2,}|\s(?=-?\d)", line.strip()) if t.strip()]
-        tok = [t.strip() for t in tok]
-        if not tok:
+        if not line.strip():
             continue
-        nums = [_num(t) for t in tok]
-        if len(tok) >= 9 and all(v is not None for v in nums[-7:]) and nums[0] is not None:
-            rows.append(dict(beam=str(tok[0]).split(".")[0], lc=" ".join(tok[1:-7]),
-                             node=str(tok[-7]).split(".")[0], fx=nums[-6], fy=nums[-5], fz=nums[-4],
-                             mx=nums[-3], my=nums[-2], mz=nums[-1]))
-            continue
-        for t in line.split():                      # แถวหัวตาราง: เก็บหน่วยตัวแรกที่เจอ
+        if "\t" in line:                              # คัดลอกจากตาราง STAAD: แยกด้วย tab, ช่องว่าง = ค่าเดิม
+            f = [x.strip() for x in line.rstrip("\r\n").split("\t")]
+            while f and not f[-1]:
+                f.pop()
+            vals = [_num(x) for x in f[-7:]] if len(f) >= 9 else []
+            if len(vals) == 7 and None not in vals:
+                beam = f[0].split(".")[0] if f[0] else beam
+                lc = " ".join(x for x in f[1:-7] if x) or lc
+                if beam is not None and lc is not None:
+                    rows.append(dict(beam=beam, lc=lc, node=f[-7].split(".")[0], fx=vals[1], fy=vals[2],
+                                     fz=vals[3], mx=vals[4], my=vals[5], mz=vals[6]))
+                    continue
+        else:
+            tok = [t.strip() for t in re.split(r"\s{2,}|\s(?=-?\d)", line.strip()) if t.strip()]
+            nums = [_num(t) for t in tok]
+            if len(tok) >= 9 and all(v is not None for v in nums[-7:]) and nums[0] is not None:
+                beam, lc = str(tok[0]).split(".")[0], " ".join(tok[1:-7])
+                rows.append(dict(beam=beam, lc=lc, node=str(tok[-7]).split(".")[0], fx=nums[-6], fy=nums[-5],
+                                 fz=nums[-4], mx=nums[-3], my=nums[-2], mz=nums[-1]))
+                continue
+            if len(tok) in (7, 8) and all(v is not None for v in nums) and beam is not None:
+                if len(tok) == 8:                     # L/C, Node, ค่า 6 ตัว (Beam เดิม)
+                    lc = str(tok[0]).split(".")[0]
+                if lc is not None:
+                    rows.append(dict(beam=beam, lc=lc, node=str(tok[-7]).split(".")[0], fx=nums[-6],
+                                     fy=nums[-5], fz=nums[-4], mx=nums[-3], my=nums[-2], mz=nums[-1]))
+                    continue
+        for t in re.split(r"[\s/()]+", line):         # แถวหัวตาราง: เก็บหน่วยตัวแรกที่เจอ
             t = t.strip().lower()
             if fu is None and t in flo:
                 fu = flo[t]
