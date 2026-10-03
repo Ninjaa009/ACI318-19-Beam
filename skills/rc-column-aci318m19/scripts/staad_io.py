@@ -76,6 +76,7 @@ class Model:
     supports: dict = field(default_factory=dict)    # joint -> "FIXED" | "PINNED" | ...
     loads: dict = field(default_factory=dict)       # id -> LoadCase (เรียงตามลำดับในไฟล์)
     material: dict = field(default_factory=dict)    # ชื่อ -> {E, FCU, ...} (หน่วย N, mm)
+    mat_of: dict = field(default_factory=dict)      # member -> ชื่อวัสดุ (CONSTANTS MATERIAL)
     units: tuple = ("METER", "KN")                  # หน่วยสุดท้ายที่ประกาศ
     skipped: list = field(default_factory=list)
 
@@ -135,6 +136,48 @@ class Model:
             return True
         f = list(self.expand(lid).values())
         return bool(f) and all(abs(x - 1.0) < 1e-9 for x in f)
+
+    def vertical_total(self, lid):
+        """ประมาณแรงแนวดิ่งรวม (N, ลง = ลบ) ของ primary load จากข้อมูลที่อ่านได้ — ใช้เทียบกับ
+        'SUMMATION FORCE-Y' ใน .anl เพื่อยืนยันว่า geometry / หน้าตัด / หน่วยถูกต้อง
+        FLOOR LOAD คิดพื้นที่เป็นกรอบสี่เหลี่ยมของ XRANGE/ZRANGE ตัดกับขอบโมเดล (แม่นเมื่อพื้นเต็มกรอบ)
+        คืน (ค่า, หมายเหตุ) — None ถ้ามีน้ำหนักชนิดที่ประมาณไม่ได้
+        """
+        lc = self.loads[lid]
+        tot, notes = 0.0, []
+        X = [p[0] for p in self.joints.values()]
+        Z = [p[2] for p in self.joints.values()]
+        for it in lc.items:
+            if it["type"] == "selfweight":
+                if it["dir"] != "Y":
+                    continue
+                w = 0.0
+                for m in self.members:
+                    mat = self.material.get(self.mat_of.get(m, ""), {})
+                    if m not in self.prism or "DENSITY" not in mat:
+                        return None, f"member {m} ไม่มีหน้าตัด PRIS หรือ DENSITY"
+                    YD, ZD = self.prism[m]
+                    w += YD * ZD * self.length(m) * mat["DENSITY"]
+                tot += it["factor"] * w
+                notes.append("selfweight")
+            elif it["type"] == "floor":
+                r = it["range"]
+                x0, x1 = (max(min(X), r["X"][0]), min(max(X), r["X"][1])) if "X" in r else (min(X), max(X))
+                z0, z1 = (max(min(Z), r["Z"][0]), min(max(Z), r["Z"][1])) if "Z" in r else (min(Z), max(Z))
+                tot += it["w"] * max(x1 - x0, 0) * max(z1 - z0, 0)
+                notes.append("floor (กรอบสี่เหลี่ยม)")
+            elif it["type"] == "member" and it["dir"] in ("GY", "PY"):
+                if it["kind"] == "UNI" and not it["rest"]:
+                    tot += it["w"] * self.length(it["member"])
+                elif it["kind"] == "CON":
+                    tot += it["w"]
+                else:
+                    return None, f"member load {it['kind']} {it['rest']}"
+            elif it["type"] == "joint":
+                tot += it.get("FY", 0.0)
+            elif it["type"] != "member":
+                return None, it["type"]
+        return tot, ", ".join(notes)
 
     def strength_combos(self):
         return [lc.id for lc in self.combos() if not self.is_service(lc.id)]
@@ -262,6 +305,12 @@ def parse_std(text):
                 lst = list(M.members) if re.search(r"\bALL\b", tgt) else ids(tgt.replace("MEMB", " "))
                 for k in lst:
                     M.beta[k] = ang
+            mm_ = re.match(r"MATERIAL\s+(\S+)\s+(.*)", U)
+            if mm_:
+                tgt = mm_.group(2)
+                lst = list(M.members) if re.search(r"\bALL\b", tgt) else ids(tgt.replace("MEMB", " "))
+                for k in lst:
+                    M.mat_of[k] = mm_.group(1)
         elif sec == "support":
             ms = re.match(r"(.*?)\b(FIXED|PINNED|ENFORCED)\b", U)
             if ms:
@@ -270,13 +319,15 @@ def parse_std(text):
         elif sec == "material":
             v = line.split()
             if tok[0] == "ISOTROPIC" and len(v) > 1:
-                mat_name = v[1]
+                mat_name = v[1].upper()
                 M.material[mat_name] = {}
             elif mat_name and len(v) >= 2 and _is_number(v[-1]):
                 key = " ".join(tok[:-1])
                 val = float(v[-1])
                 if key in ("E", "G", "STRENGTH FCU", "STRENGTH FC", "STRENGTH FY"):
                     val *= F / L ** 2                 # แรง/พื้นที่ → MPa
+                elif key == "DENSITY":
+                    val *= F / L ** 3                 # แรง/ปริมาตร → N/mm³
                 M.material[mat_name][key] = val
         elif sec == "comb":
             v = line.split()
@@ -335,6 +386,40 @@ def parse_std(text):
 
 
 # ---------------------------------------------------------------- .anl
+def extract_input_echo(text):
+    """ดึงสำเนาไฟล์ input ที่ STAAD พิมพ์ไว้ต้นไฟล์ .anl (บรรทัด "    12. MEMBER INCIDENCES")
+    คืนข้อความ .std หรือ None ถ้าไม่พบ — ใช้ .anl ไฟล์เดียวแทน .std ได้
+    """
+    out = []
+    for raw in str(text).splitlines():
+        m = re.match(r"^\s{0,10}(\d+)\.\s(.*)$", raw)
+        if not m:
+            continue
+        out.append(m.group(2).rstrip())
+        if m.group(2).strip().upper() == "FINISH":
+            break
+    return "\n".join(out) if out and out[0].strip().upper().startswith("STAAD") else None
+
+
+def applied_totals(text):
+    """'TOTAL APPLIED LOAD (...) SUMMARY (LOADING n)' ใน .anl → {n: (ΣFx, ΣFy, ΣFz) หน่วย N}"""
+    out, cur, uf = {}, None, None
+    for raw in str(text).splitlines():
+        U = raw.upper()
+        m = re.search(r"TOTAL APPLIED LOAD\s*\(\s*(\S+)\s+(\S+)\s*\)\s*SUMMARY\s*\(LOADING\s+(\d+)", U)
+        if m:
+            k = _unit_key(m.group(1), FORCE)
+            cur, uf = int(m.group(3)), FORCE[k] if k else None
+            out[cur] = [None, None, None]
+            continue
+        m = re.search(r"SUMMATION FORCE-([XYZ])\s*=\s*([-\d.Ee+]+)", U)
+        if m and cur is not None and uf:
+            out[cur]["XYZ".index(m.group(1))] = float(m.group(2)) * uf
+            if m.group(1) == "Z":
+                cur = None
+    return {k: tuple(v) for k, v in out.items() if None not in v}
+
+
 @dataclass
 class Forces:
     data: dict = field(default_factory=dict)   # (member, load) -> {joint: (fx, fy, fz, mx, my, mz)} N, N·mm

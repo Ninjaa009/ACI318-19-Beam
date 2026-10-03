@@ -72,6 +72,10 @@ description: ออกแบบและตรวจสอบเสา คสล
   `check_equilibrium(...)` ตรวจ Mz_s + Mz_e + Fy_e·L = 0 และ My_s + My_e − Fz_e·L = 0 ด้วย L จาก geometry
   (ยืนยันแกน/หน่วย/start-end), `Model.strength_combos()` ตัด combo ใช้งาน (ตัวคูณทุกตัว = 1.0 หรือชื่อ SERVICE/ASD/
   DEFLECTION) และ primary load ออก, `Model.is_lateral(lid)` บอกว่ามีแรงด้านข้างหรือไม่ (ใช้เลือก combo ตรวจเครื่องหมาย P)
+  — `extract_input_echo(anl_text)` ดึงสำเนา input ต้นไฟล์ .anl (ใช้ .anl ไฟล์เดียวแทน .std ได้),
+  `applied_totals(anl_text)` อ่าน SUMMATION FORCE-X/Y/Z ของแต่ละ load แล้วเทียบกับ `Model.vertical_total(lid)`
+  (selfweight จาก PRIS × L × DENSITY, floor load × พื้นที่กรอบ) เพื่อยืนยัน geometry/หน้าตัด/หน่วย;
+  **`PERFORM ANALYSIS PRINT ALL` อย่างเดียวไม่พิมพ์แรงใน member** — ต้องมี `PRINT MEMBER FORCES` (ยืนยันกับไฟล์จริงแล้ว)
   — ⚠️ STRENGTH FCU ใน .std เป็นกำลังลูกบาศก์ ไม่ใช่ f′c; ⚠️ รูปแบบ .anl ทดสอบกับไฟล์จำลอง (`references/staad_example/`)
   ยังต้องยืนยันกับไฟล์ .anl จริง
 - `from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, flip_axial)`: แปลง Member End Forces (แกน local) ตามตารางข้างบน — **ไม่ขึ้นกับ beta** เพราะแรงและ YD/ZD อยู่ในแกน local เดียวกัน
@@ -153,7 +157,7 @@ description: ออกแบบและตรวจสอบเสา คสล
 
 ## 10. การตรวจสอบความถูกต้อง
 
-`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 94/94** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C11 sign convention/STAAD, C12 วางตาราง Beam End Force + หน่วยผสม, C13 อ่านไฟล์ .std/.anl + สมดุลเสาด้วย L จาก geometry) · ระบบ sway (incoming): `python3 scripts/incoming/test_sway.py` — ผ่าน 26/26 (Q, จำแนกชั้น ตาราง RCDC, ด่าน non-sway + bypass, ทิศเซตาม beta)
+`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 102/102** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C11 sign convention/STAAD, C12 วางตาราง Beam End Force + หน่วยผสม, C13 อ่านไฟล์ .std/.anl + สมดุลเสาด้วย L จาก geometry + .anl จริง: สำเนา input และน้ำหนักรวมตรง STAAD) · ระบบ sway (incoming): `python3 scripts/incoming/test_sway.py` — ผ่าน 26/26 (Q, จำแนกชั้น ตาราง RCDC, ด่าน non-sway + bypass, ทิศเซตาม beta)
 
 - ตรงกับ RCDC: φPn,max 1,232.14 kN; φMcap แกนเดียว 54.22 vs 54.16 kN·m; φVc 50.79/52.28 kN; φVs 107.37 kN; Q 0.011 (incoming)
 - **ยังไม่ทราบสาเหตุ:** φMcap สองแกน (มุม 33.1°) solver 54.26 vs RCDC 53.66 kN·m (RCDC ต่ำกว่า 1.1%)

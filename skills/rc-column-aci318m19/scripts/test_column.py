@@ -291,6 +291,17 @@ def run():
     d = Fo.data[(12, 1)]
     check("C13", "น้ำหนักเสาเอง = Fx(N12) + Fx(N24) = 0.5×0.4×3.5×24 (kN)", (d[12][0] + d[24][0]) / 1e3, 16.8, 0.01)
     check_true("C13", "ids: '1 TO 7 BY 3 10' → [1, 4, 7, 10]", SIO.ids("1 TO 7 BY 3 10") == [1, 4, 7, 10])
+    real = (ex / "frame_3x2_real_noforces.anl").read_text()       # .anl จริงจาก STAAD.Pro 2025 (ตัดบางส่วน)
+    Me = SIO.parse_std(SIO.extract_input_echo(real))
+    check_true("C13", ".anl จริง: อ่านสำเนา input ต้นไฟล์ได้โมเดลเดียวกับ .std",
+               (Me.joints, Me.members, Me.prism, Me.strength_combos())
+               == (Mo.joints, Mo.members, Mo.prism, Mo.strength_combos()))
+    tot = SIO.applied_totals(real)
+    for lid, exp in ((1, -507.60), (2, -432.00), (3, -294.20)):
+        check("C13", f"LOAD {lid}: ΣFy จาก .anl จริง (kN)", tot[lid][1] / 1e3, exp, 1e-9)
+        check("C13", f"LOAD {lid}: ΣFy ที่คำนวณจาก .std (kN) เทียบ STAAD", Mo.vertical_total(lid)[0] / 1e3, exp, 0.01)
+    check_true("C13", ".anl จริงที่ใช้ PRINT ALL อย่างเดียว: ไม่มีตาราง MEMBER END FORCES → ว่าง (แอปแนะนำ PRINT MEMBER FORCES)",
+               not SIO.parse_anl(real).data)
     try:
         SIO.parse_anl("MEMBER END FORCES\n  1 1 1 1 2 3 4 5 6")
         nounit = False

@@ -30,16 +30,22 @@ def _read(up):
 # ---------------------------------------------------------------- ขั้นที่ 1
 st.header("ขั้นที่ 1 · Geometry และน้ำหนักบรรทุก (.std)")
 c1, c2 = st.columns([3, 1])
-up = c1.file_uploader("ไฟล์ input ของ STAAD (.std)", type=["std", "txt"], key="sm_std")
+up = c1.file_uploader("ไฟล์ input ของ STAAD (.std) — หรือใช้ไฟล์ .anl ก็ได้ (อ่านจากสำเนา input ต้นไฟล์)",
+                      type=["std", "anl", "txt"], key="sm_std")
 if c2.button("ใช้โมเดลตัวอย่าง", help="โครง 1 ชั้น 3×2 ช่วง (references/staad_example/frame_3x2.std ของ skill)"):
     st.session_state.std_text = EXAMPLE.read_text()
     st.session_state.std_name = EXAMPLE.name
     st.session_state.anl_text = (EXAMPLE_DIR / "frame_3x2_cols11_12.anl").read_text()
     st.session_state.anl_name = "example"
 if up is not None and st.session_state.get("std_name") != up.name + str(up.size):
-    st.session_state.std_text = _read(up)
+    raw = _read(up)
+    echo = S.extract_input_echo(raw) if up.name.lower().endswith((".anl", ".txt")) else None
+    st.session_state.std_text = echo or raw
     st.session_state.std_name = up.name + str(up.size)
     st.session_state.pop("anl_text", None)
+    if echo:                                        # .anl ไฟล์เดียว: ใช้เป็นผลวิเคราะห์ด้วย
+        st.session_state.anl_text = raw
+        st.session_state.anl_name = up.name + str(up.size)
 
 if not st.session_state.get("std_text"):
     st.info("อัปโหลดไฟล์ .std หรือกด **ใช้โมเดลตัวอย่าง**")
@@ -121,8 +127,9 @@ if not any(M.is_lateral(c.id) for c in M.combos()):
 
 # ---------------------------------------------------------------- ขั้นที่ 2
 st.header("ขั้นที่ 2 · ผลวิเคราะห์ (.anl)")
-st.caption("ไฟล์ .anl ต้องมีตาราง MEMBER END FORCES — ในไฟล์ .std ใช้ `PERFORM ANALYSIS PRINT ALL` "
-           "หรือ `PRINT MEMBER FORCES` · หน่วยอ่านจากบรรทัด `ALL UNITS ARE` ของตาราง")
+st.caption("ไฟล์ .anl ต้องมีตาราง MEMBER END FORCES — ในไฟล์ .std ต้องมีบรรทัด `PRINT MEMBER FORCES` ต่อจาก "
+           "`PERFORM ANALYSIS` (`PRINT ALL` อย่างเดียวไม่พิมพ์แรงใน member) · หน่วยอ่านจากบรรทัด `ALL UNITS ARE` · "
+           "ถ้าอัปโหลด .anl ไว้ในขั้นที่ 1 แล้วไม่ต้องอัปโหลดซ้ำ")
 up2 = st.file_uploader("ไฟล์ผลวิเคราะห์ (.anl)", type=["anl", "txt"], key="sm_anl")
 if up2 is not None and st.session_state.get("anl_name") != up2.name + str(up2.size):
     st.session_state.anl_text = _read(up2)
@@ -136,8 +143,33 @@ try:
 except ValueError as e:
     st.error(str(e))
     st.stop()
+# ตรวจน้ำหนักรวมของแต่ละ load: STAAD (SUMMATION FORCE-Y) เทียบกับที่แอปคำนวณจาก geometry/หน้าตัด/หน่วยที่อ่านได้
+tot = S.applied_totals(st.session_state.anl_text)
+if tot:
+    rows, ok_all = [], True
+    for lid, (fx, fy, fz) in sorted(tot.items()):
+        est, how = M.vertical_total(lid) if lid in M.loads and M.loads[lid].kind == "primary" else (None, "")
+        diff = None if est is None or abs(fy) < 1e-9 else (est - fy) / abs(fy)
+        ok = diff is not None and abs(diff) <= 0.01
+        ok_all &= ok or est is None
+        rows.append({"LOAD": lid, "ชื่อ": M.loads[lid].title if lid in M.loads else "",
+                     "STAAD ΣFy (kN)": fy / 1e3, "แอปคำนวณ (kN)": None if est is None else est / 1e3,
+                     "ต่าง (%)": None if diff is None else diff * 100, "วิธี": how,
+                     "ผล": "✓" if ok else ("ตรวจไม่ได้" if est is None else "✗")})
+    with st.expander("ตรวจน้ำหนักรวมแต่ละ load กับ STAAD", expanded=not ok_all):
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+                     column_config={c: st.column_config.NumberColumn(format="%.2f")
+                                    for c in ("STAAD ΣFy (kN)", "แอปคำนวณ (kN)", "ต่าง (%)")})
+    (st.success if ok_all else st.warning)(
+        "น้ำหนักรวมทุก load ตรงกับ STAAD (±1%) — geometry, หน้าตัด, วัสดุ และหน่วยที่อ่านจาก .std ถูกต้อง"
+        if ok_all else "น้ำหนักรวมบาง load ไม่ตรงกับ STAAD — ตรวจว่าไฟล์ .std กับ .anl เป็นโมเดลเดียวกัน")
 if not Fo.data:
-    st.error("ไม่พบตาราง MEMBER END FORCES ในไฟล์ .anl — เพิ่ม PRINT MEMBER FORCES ในไฟล์ .std แล้วรันใหม่")
+    st.error("**ไฟล์ .anl นี้ไม่มีตาราง MEMBER END FORCES** — `PERFORM ANALYSIS PRINT ALL` ไม่ได้พิมพ์แรงใน member "
+             "ให้เพิ่มคำสั่งพิมพ์ในไฟล์ .std ต่อจากบรรทัด PERFORM ANALYSIS แล้วรันใหม่:")
+    st.code("PERFORM ANALYSIS PRINT ALL\nPRINT MEMBER FORCES\nFINISH", language=None)
+    st.caption("ถ้าโมเดลใหญ่ พิมพ์เฉพาะเสาได้ เช่น `PRINT MEMBER FORCES LIST 1 TO 12` · ใน STAAD ทำผ่านเมนู "
+               "Analysis → Post-Analysis Print → Member Forces ก็ได้")
+    st.session_state.pop("staad_forces", None)
     st.stop()
 
 unknown = [m for m in Fo.members() if m not in M.members]

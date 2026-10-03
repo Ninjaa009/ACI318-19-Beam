@@ -47,3 +47,19 @@ def test_column_page_from_model_prefills_and_designs():
     assert not at.exception
     # ด้าน YD 500 mm: เหล็กกลางห่างเหล็กมุม 170 mm > 150 mm ต้องมีปลอกยึด (§25.7.2.3) — ผลจริงของหน้าตัดนี้
     assert [e.value for e in at.error] == ["มีรายการไม่ผ่าน — ดูตารางสรุป"]
+
+
+REAL = (EX / "frame_3x2_real_noforces.anl").read_text()
+
+
+def test_real_anl_without_member_forces_explains_fix():
+    """.anl จริง (PRINT ALL อย่างเดียว): ใช้แทน .std ได้, น้ำหนักรวมตรง STAAD, และบอกให้เพิ่ม PRINT MEMBER FORCES"""
+    at = AppTest.from_file("../views/staad_model.py", default_timeout=60)
+    at.session_state["std_text"], at.session_state["std_name"] = S.extract_input_echo(REAL), "x"
+    at.session_state["anl_text"], at.session_state["anl_name"] = REAL, "x"
+    at.run()
+    assert not at.exception
+    assert any("น้ำหนักรวมทุก load ตรงกับ STAAD" in s.value for s in at.success)
+    assert any("ไม่มีตาราง MEMBER END FORCES" in e.value for e in at.error)
+    assert any("PRINT MEMBER FORCES" in c.value for c in at.code)
+    assert "staad_forces" not in at.session_state
