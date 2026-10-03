@@ -4,7 +4,7 @@
 
 parse_std(text)  -> Model   : geometry, หน้าตัด PRIS, beta, ฐานรองรับ, load case, load combination
 parse_anl(text)  -> Forces  : ตาราง MEMBER END FORCES ทุกชุด (แกน local) พร้อมหน่วยจากหัวตาราง
-column_forces(model, forces, member, load) -> dict ของ from_staad (P = Fx ที่ start node)
+column_forces(model, forces, member, load) -> dict ของ from_staad + ทิศการดัด (บน/ล่างจาก geometry)
 
 ข้อจำกัด
 - รองรับคำสั่งหลักที่ใช้กับโครงข้อแข็ง คสล.: JOINT COORDINATES, MEMBER INCIDENCES, MEMBER PROPERTY (PRIS),
@@ -529,14 +529,37 @@ def base_reactions(model, forces, load):
     return tot, n, nsup
 
 
+def end_curvature(m_start, m_end, tiny=1e3):
+    """ทิศการดัดจากเครื่องหมายโมเมนต์ปลายใน member end forces ของ STAAD (แรงกระทำต่อชิ้นส่วน, แกน local)
+    เครื่องหมายเดียวกัน = โค้งสองทาง (double), ต่างกัน = โค้งทางเดียว (single) — ไม่ต้องใช้ความยาว
+    ปลายใดเป็นศูนย์ (< tiny N·mm) → "auto" ให้ curvature_ratio จัดการกรณี M1 = 0 / M1 = M2 = 0
+    """
+    if abs(m_start) < tiny or abs(m_end) < tiny:
+        return "auto"
+    return "double" if m_start * m_end > 0 else "single"
+
+
 def column_forces(model, forces, member, load, from_staad):
-    """แรงของเสาใน load หนึ่ง → dict ของ from_staad (P = Fx ที่ start node ตาม incidences)"""
+    """แรงของเสาใน load หนึ่ง → dict ของ from_staad + ทิศการดัด (curv_x, curv_y)
+
+    ใช้ geometry ตัดสินบน/ล่าง ไม่สมมติว่า start node อยู่ล่าง:
+    - Mxt / Myt = โมเมนต์ที่ joint บน, Mxb / Myb = ที่ joint ล่าง (ใช้ขนาด)
+    - Pu = แรงอัดที่ joint ล่าง (มากกว่าที่หัวเสาเท่าน้ำหนักเสาเอง): start ล่าง → +Fx(start), end ล่าง → −Fx(end)
+    - curv_x / curv_y จากเครื่องหมายโมเมนต์ปลาย (end_curvature) — M1/M2 ตัดสินจากขนาดใน slenderness
+    """
     a, b = model.members[member]
     d = forces.data.get((member, load))
     if not d or a not in d or b not in d:
-        raise KeyError(f"ไม่มีแรงของ member {member} load {load} ครบทั้ง 2 joint ใน .anl")
+        raise KeyError(f"ไม่มีแรงของ member {member} load {load} ครบทั้ง 2 joint")
     s, e = d[a], d[b]
-    return from_staad(s[0], s[1], s[2], s[4], s[5], e[4], e[5])
+    f = from_staad(s[0], s[1], s[2], s[4], s[5], e[4], e[5])     # t = end, b = start
+    lo, _ = model.bottom_top(member)
+    if lo != a:                                                  # start อยู่บน: สลับป้ายบน/ล่าง
+        f["Mxt"], f["Mxb"], f["Myt"], f["Myb"] = f["Mxb"], f["Mxt"], f["Myb"], f["Myt"]
+        f["Pu"] = -e[0]
+    f["curv_x"] = end_curvature(s[5], e[5])                      # Mz (ภายใน x)
+    f["curv_y"] = end_curvature(s[4], e[4])                      # My
+    return f
 
 
 def check_equilibrium(model, forces, member, load, tol=0.02):

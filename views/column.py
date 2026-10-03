@@ -162,15 +162,21 @@ if mode == "model":
     rows_in = []
     for lc in use:
         f = S_IO.column_forces(SM, SF, sel, lc, C.from_staad)
+        cx, cy = f.pop("curv_x"), f.pop("curv_y")                             # จากเครื่องหมายโมเมนต์ปลาย
         f = {k: v / (M if k[0] == "M" else F) for k, v in f.items()}            # N, N·mm → หน่วยที่แสดง
-        rows_in.append((str(lc), f, not SM.is_lateral(lc), "auto", "auto"))
+        rows_in.append((str(lc), f, not SM.is_lateral(lc), cx, cy))
     if rows_in:
         with st.expander(f"ค่าที่ใช้คำนวณ ({fu}, {mu})", expanded=True):
-            st.dataframe(pd.DataFrame([{"combo": n, f"P = Fx start ({fu})": f["Pu"],
-                                        f"|Mz| end ({mu})": f["Mxt"], f"|Mz| start ({mu})": f["Mxb"],
-                                        f"|My| end ({mu})": f["Myt"], f"|My| start ({mu})": f["Myb"],
+            CV = {"single": "ทางเดียว", "double": "สองทาง", "auto": "ปลายหนึ่ง = 0"}
+            st.dataframe(pd.DataFrame([{"combo": n, f"Pu ตีนเสา ({fu})": f["Pu"],
+                                        f"|Mz| บน ({mu})": f["Mxt"], f"|Mz| ล่าง ({mu})": f["Mxb"],
+                                        "Mz โค้ง": CV[cx],
+                                        f"|My| บน ({mu})": f["Myt"], f"|My| ล่าง ({mu})": f["Myb"],
+                                        "My โค้ง": CV[cy],
                                         f"|Fy| ({fu})": f["Vuy"], f"|Fz| ({fu})": f["Vux"]}
-                                       for n, f, *_ in rows_in]), hide_index=True, width="stretch")
+                                       for n, f, _g, cx, cy in rows_in]), hide_index=True, width="stretch")
+            st.caption("บน/ล่างตัดสินจากพิกัด Y ของ joint · ทิศการดัดจากเครื่องหมายโมเมนต์ปลายใน STAAD "
+                       "(เครื่องหมายเดียวกัน = โค้งสองทาง) · M2 = ปลายที่โมเมนต์มากกว่า, M1 = ปลายที่น้อยกว่า")
     else:
         st.warning("ยังไม่ได้เลือก combo")
 else:

@@ -297,6 +297,18 @@ def run():
     for lid, exp in ((1, 507.60), (2, 432.00), (3, 294.20), (101, 1315.44), (102, 1598.24)):
         check("C13", f"ตารางจริง: Σ แรงอัดฐานเสา 12 ต้น load {lid} = น้ำหนักรวม (kN)",
               SIO.base_reactions(Mo, Ft, lid)[0] / 1e3, exp, 0.02)
+    fc = SIO.column_forces(Mo, Ft, 12, 102, C.from_staad)
+    check_true("C13", "เสา 12 COMB 102: Mz 9.624/20.958 เครื่องหมายเดียวกัน → โค้งสองทาง ทั้งสองแกน (ตรงกับ |F|·L)",
+               (fc["curv_x"], fc["curv_y"]) == ("double", "double"))
+    check_true("C13", "เสา 5: My = 0 ทั้งสองปลาย → auto (กติกา M1 = M2 = 0)",
+               SIO.column_forces(Mo, Ft, 5, 102, C.from_staad)["curv_y"] == "auto")
+    check_true("C13", "end_curvature: เครื่องหมายต่างกัน → single", SIO.end_curvature(5e6, -7e6) == "single")
+    # เสาวาดจากบนลงล่าง (start = joint บน): ป้ายบน/ล่างต้องตาม geometry และ Pu = แรงอัดที่ตีนเสา
+    Mr = SIO.Model(joints={1: (0.0, 0.0, 0.0), 2: (0.0, 3500.0, 0.0)}, members={1: (2, 1)}, prism={1: (500.0, 400.0)})
+    Fr = SIO.Forces(data={(1, 9): {2: (90e3, 1e3, 2e3, 0.0, 3e6, 20e6), 1: (-100e3, -1e3, -2e3, 0.0, 4e6, 10e6)}})
+    fr = SIO.column_forces(Mr, Fr, 1, 9, C.from_staad)
+    check_true("C13", "start อยู่บน: Mz บน = ค่าที่ joint บน (20), ล่าง = 10; Pu ตีนเสา = −Fx(end) = 100 kN",
+               (fr["Mxt"], fr["Mxb"], fr["Myt"], fr["Myb"], fr["Pu"]) == (20e6, 10e6, 3e6, 4e6, 100e3))
     check_true("C13", ".anl จริงที่ใช้ PRINT ALL อย่างเดียว: ไม่มีตาราง MEMBER END FORCES → ว่าง (แอปแนะนำ PRINT MEMBER FORCES)",
                not SIO.parse_anl(real).data)
     try:

@@ -370,7 +370,7 @@ def curvature_ratio(M_top, M_bot, V=None, L=None, curvature=None):
     """คืน (M1/M2 ตาม ACI, คำอธิบาย) — ลบ = โค้งทางเดียว, บวก = โค้งสองทาง (§6.2.5.1)
 
     เครื่องหมายโมเมนต์จากแต่ละโปรแกรมไม่เหมือนกัน จึงตัดสินจาก
-    1) curvature = "single" / "double" ถ้าผู้ใช้ระบุ หรือ
+    1) curvature = "single" / "double" ถ้ากำหนดมา (ผู้ใช้ระบุ หรือจากเครื่องหมายโมเมนต์ปลายใน STAAD) หรือ
     2) สมดุลแรงเฉือนของเสาที่ไม่มีแรงกระทำระหว่างช่วง: |V|·L ≈ |Mt| + |Mb| → โค้งสองทาง,
        |V|·L ≈ ||Mt| − |Mb|| → โค้งทางเดียว (L = ความยาวชิ้นส่วนในการวิเคราะห์)
     กรณี M1 = M2 = 0 ใช้ −1 (กติกาของสกิล: อนุรักษ์นิยม สอดคล้องกับ Cm = 1.0)
@@ -383,7 +383,8 @@ def curvature_ratio(M_top, M_bot, V=None, L=None, curvature=None):
         return 0.0, "โมเมนต์ปลายหนึ่งเป็นศูนย์ → M1/M2 = 0"
     r = M1 / M2
     if curvature in ("single", "double"):
-        return (r if curvature == "double" else -r), f"ผู้ใช้ระบุ {curvature} curvature"
+        return (r if curvature == "double" else -r), (f"กำหนดทิศการดัด: {curvature} curvature "
+                                                       "(เครื่องหมายโมเมนต์ปลายใน STAAD หรือผู้ใช้ระบุ)")
     if V is None or not L:
         raise ValueError("ระบุ curvature หรือส่ง V และ L เพื่อตรวจทิศการดัดจากสมดุลแรงเฉือน")
     vd, vs = (a + b) / L, abs(a - b) / L

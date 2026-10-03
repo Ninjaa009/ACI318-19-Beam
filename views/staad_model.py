@@ -259,16 +259,18 @@ else:
 
 pick = st.selectbox("ดูแรงของเสา", fcols, key="sm_pick", format_func=lambda m: f"member {m}")
 rows = []
+CV = {"single": "ทางเดียว", "double": "สองทาง", "auto": "ปลายหนึ่ง = 0"}
 for lc in Fo.loads():
     if (pick, lc) not in Fo.data:
         continue
     f = S.column_forces(M, Fo, pick, lc, C.from_staad)
     rows.append({"load": lc, "ชื่อ": M.loads[lc].title if lc in M.loads else "",
                  "ใช้ออกแบบ": "✓" if lc in M.strength_combos() else "",
-                 "P = Fx start (kN)": f["Pu"] / 1e3, "|Mz| start / end (kN·m)": f"{f['Mxb'] / 1e6:.3f} / {f['Mxt'] / 1e6:.3f}",
-                 "|My| start / end (kN·m)": f"{f['Myb'] / 1e6:.3f} / {f['Myt'] / 1e6:.3f}",
+                 "Pu ตีนเสา (kN)": f["Pu"] / 1e3,
+                 "|Mz| ล่าง / บน (kN·m)": f"{f['Mxb'] / 1e6:.3f} / {f['Mxt'] / 1e6:.3f}", "Mz โค้ง": CV[f["curv_x"]],
+                 "|My| ล่าง / บน (kN·m)": f"{f['Myb'] / 1e6:.3f} / {f['Myt'] / 1e6:.3f}", "My โค้ง": CV[f["curv_y"]],
                  "|Fy| (kN)": f["Vuy"] / 1e3, "|Fz| (kN)": f["Vux"] / 1e3})
 st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
              column_config={c: st.column_config.NumberColumn(format="%.3f")
-                            for c in ("P = Fx start (kN)", "|Fy| (kN)", "|Fz| (kN)")})
+                            for c in ("Pu ตีนเสา (kN)", "|Fy| (kN)", "|Fz| (kN)")})
 page_link("views/column.py", label="ไปขั้นที่ 3 · ออกแบบเสา", icon="🏛️")
