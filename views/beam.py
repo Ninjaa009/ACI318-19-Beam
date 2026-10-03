@@ -115,6 +115,24 @@ if src == "model":
                      "ตาราง STAAD — load บนคาน (.anl) กับตารางแรงอาจไม่ใช่โมเดลเดียวกัน")
         else:
             st.success("ตรวจสมดุลคานผ่าน: แรงปลาย start + load บนคาน → ได้ M และ V ที่ปลาย end ตรงกับ STAAD ทุก combo")
+        ja, jb = SM.members[bm]
+        with st.expander("ที่มาของเครื่องหมาย: Mz ของ STAAD → โมเมนต์ออกแบบ (บวก = ดึงล่าง)", expanded=True):
+            st.markdown(
+                "ตาราง Beam End Force ของ STAAD เป็น**แรงที่กระทำต่อปลายคาน**ตามกฎมือขวารอบแกน local z "
+                "ไม่ใช่โมเมนต์ดัดแบบที่ใช้ออกแบบ จึงต้องแปลง: **ปลาย start: M = −Mz** · **ปลาย end: M = +Mz** · "
+                "ผลลบ = ดึงบน (เหล็กบน), ผลบวก = ดึงล่าง (เหล็กล่าง)")
+            st.dataframe(pd.DataFrame([{
+                "combo": r["load"],
+                f"Mz STAAD ที่ N{ja} (start)": SF.data[(bm, r["load"])][ja][5] / 1e6,
+                "→ M ปลายซ้าย = −Mz": R["diag"][r["load"]]["M"][0] / 1e6,
+                f"Mz STAAD ที่ N{jb} (end)": SF.data[(bm, r["load"])][jb][5] / 1e6,
+                "→ M ปลายขวา = +Mz": R["diag"][r["load"]]["M"][-1] / 1e6,
+                "M+ สูงสุดในช่วง": r["M_mid"] / 1e6} for r in R["rows"]]), hide_index=True, width="stretch",
+                column_config={c: st.column_config.NumberColumn(format="%.3f") for c in (
+                    f"Mz STAAD ที่ N{ja} (start)", "→ M ปลายซ้าย = −Mz", f"Mz STAAD ที่ N{jb} (end)",
+                    "→ M ปลายขวา = +Mz", "M+ สูงสุดในช่วง")})
+            st.caption("หน่วย kN·m ที่จุดต่อ (c/c) — ค่าออกแบบข้างล่างใช้ที่ผิวเสา · ตรวจได้: คานต่อเนื่องรับน้ำหนักแนวดิ่ง"
+                       "ต้องได้ลบที่ปลายทั้งสองและบวกกลางช่วง")
         fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
                             subplot_titles=("โมเมนต์ (kN·m, บวก = ดึงล่าง)", "แรงเฉือน (kN)"))
         for lc, D in R["diag"].items():
