@@ -6,7 +6,8 @@ import streamlit as st
 
 st.set_page_config(page_title="RC Design ACI 318M-19", page_icon="🏗️", layout="wide")
 pg = st.navigation([
-    st.Page("views/beam.py", title="คาน (Beam)", icon="📏", default=True),
-    st.Page("views/column.py", title="เสา (Column)", icon="🏛️"),
+    st.Page("views/staad_model.py", title="1–2 · โมเดล STAAD", icon="🧊", default=True),
+    st.Page("views/column.py", title="3 · ออกแบบเสา", icon="🏛️"),
+    st.Page("views/beam.py", title="ออกแบบคาน", icon="📏"),
 ])
 pg.run()

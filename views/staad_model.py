@@ -1,0 +1,193 @@
+"""ขั้นที่ 1–2: นำเข้าโมเดล STAAD.Pro (.std) และผลวิเคราะห์ (.anl) — เปิดผ่าน app.py"""
+from pathlib import Path
+
+import pandas as pd
+import streamlit as st
+
+from rcbeam.nav import page_link
+from rcbeam.colcheck import C
+from rcbeam.staad_view import model_figure, plan_figure
+import staad_io as S   # noqa: E402  (อยู่ใน skills/rc-column-aci318m19/scripts ซึ่ง colcheck เพิ่มเข้า sys.path แล้ว)
+
+EXAMPLE_DIR = Path(__file__).resolve().parent.parent / "skills" / "rc-column-aci318m19" / "references" / "staad_example"
+EXAMPLE = EXAMPLE_DIR / "frame_3x2.std"
+
+st.title("โมเดล STAAD.Pro")
+st.caption("ขั้นที่ 1 Geometry (.std) → ขั้นที่ 2 ผลวิเคราะห์ (.anl) → ขั้นที่ 3 ออกแบบ (หน้าเสา) · "
+           "อ่านแกน, หน้าตัด, start node, ความยาว, หน่วย และ combo จากไฟล์โดยตรง ไม่ต้องเดา")
+
+
+def _read(up):
+    raw = up.getvalue()
+    for enc in ("utf-8", "cp874", "latin-1"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1", "replace")
+
+
+# ---------------------------------------------------------------- ขั้นที่ 1
+st.header("ขั้นที่ 1 · Geometry และน้ำหนักบรรทุก (.std)")
+c1, c2 = st.columns([3, 1])
+up = c1.file_uploader("ไฟล์ input ของ STAAD (.std)", type=["std", "txt"], key="sm_std")
+if c2.button("ใช้โมเดลตัวอย่าง", help="โครง 1 ชั้น 3×2 ช่วง (references/staad_example/frame_3x2.std ของ skill)"):
+    st.session_state.std_text = EXAMPLE.read_text()
+    st.session_state.std_name = EXAMPLE.name
+    st.session_state.anl_text = (EXAMPLE_DIR / "frame_3x2_cols11_12.anl").read_text()
+    st.session_state.anl_name = "example"
+if up is not None and st.session_state.get("std_name") != up.name + str(up.size):
+    st.session_state.std_text = _read(up)
+    st.session_state.std_name = up.name + str(up.size)
+    st.session_state.pop("anl_text", None)
+
+if not st.session_state.get("std_text"):
+    st.info("อัปโหลดไฟล์ .std หรือกด **ใช้โมเดลตัวอย่าง**")
+    st.stop()
+
+try:
+    M = S.parse_std(st.session_state.std_text)
+except Exception as e:                                  # noqa: BLE001 — แจ้งผู้ใช้แทนการล่ม
+    st.error(f"อ่านไฟล์ .std ไม่ได้: {e}")
+    st.stop()
+st.session_state.staad_model = M
+if not M.members:
+    st.error("ไม่พบ JOINT COORDINATES / MEMBER INCIDENCES ในไฟล์")
+    st.stop()
+
+cols, beams = M.columns(), M.beams()
+k = st.columns(5)
+k[0].metric("joint", len(M.joints))
+k[1].metric("member", len(M.members))
+k[2].metric("เสา (แนวดิ่ง)", len(cols))
+k[3].metric("load case / combo", f"{len(M.primaries())} / {len(M.combos())}")
+k[4].metric("หน่วยในไฟล์", " ".join(M.units))
+miss = [m for m in M.members if m not in M.prism]
+if miss:
+    st.warning(f"member ที่ไม่มีหน้าตัด PRIS (อาจเป็นเหล็กรูปพรรณหรือไม่ได้กำหนด): {miss[:20]}"
+               + (" …" if len(miss) > 20 else ""))
+
+loads = list(M.loads)
+v1, v2, v3 = st.columns([2, 2, 1])
+show_load = v1.selectbox("แสดงน้ำหนักบรรทุก", [None] + loads, key="sm_load",
+                         format_func=lambda x: "— ไม่แสดง —" if x is None else
+                         f"{x}: {M.loads[x].title}")
+hl = v2.selectbox("เน้นเสา / แสดงแกน local", [None] + cols, key="sm_hl",
+                  format_func=lambda x: "— ไม่เลือก —" if x is None else f"member {x}")
+jid = v3.checkbox("เลข joint", key="sm_jid")
+g1, g2 = st.columns([3, 2])
+with g1:
+    st.plotly_chart(model_figure(M, show_load, hl, joint_ids=jid), width="stretch")
+with g2:
+    st.markdown("**ผังมองจากด้านบน** (หน้าตัดเสาตามขนาดจริง)")
+    st.plotly_chart(plan_figure(M, hl), width="stretch")
+    st.caption("เสาแนวดิ่ง beta = 0: YD ขนานแกนโลก X (Mz ใช้ความลึก YD), ZD ขนานแกนโลก Z (My ใช้ความลึก ZD)")
+
+t1, t2, t3, t4 = st.tabs(["เสา", "คาน", "Load case", "Load combination"])
+with t1:
+    st.dataframe(pd.DataFrame([{
+        "member": m, "start": M.members[m][0], "end": M.members[m][1],
+        "start อยู่": "ล่าง" if M.bottom_top(m)[0] == M.members[m][0] else "บน", "L (m)": M.length(m) / 1000,
+        "YD (mm)": M.prism.get(m, (None, None))[0], "ZD (mm)": M.prism.get(m, (None, None))[1],
+        "beta (°)": M.beta.get(m, 0.0)} for m in cols]), hide_index=True, width="stretch")
+    top = [m for m in cols if M.bottom_top(m)[0] != M.members[m][0]]
+    if top:
+        st.info(f"เสา {top} วาดจากบนลงล่าง (start node อยู่บน) — แอปยังใช้ Fx ที่ start node เป็น P ได้ถูกต้อง")
+with t2:
+    st.dataframe(pd.DataFrame([{"member": m, "start": M.members[m][0], "end": M.members[m][1],
+                                "L (m)": M.length(m) / 1000, "YD (mm)": M.prism.get(m, (None, None))[0],
+                                "ZD (mm)": M.prism.get(m, (None, None))[1]} for m in beams]),
+                 hide_index=True, width="stretch")
+with t3:
+    st.dataframe(pd.DataFrame([{"LOAD": lc.id, "ชนิด": lc.loadtype, "ชื่อ": lc.title,
+                                "แรงด้านข้าง": "มี" if lc.lateral else "-",
+                                "คำสั่ง": " · ".join(lc.lines)} for lc in M.primaries()]),
+                 hide_index=True, width="stretch")
+with t4:
+    st.dataframe(pd.DataFrame([{
+        "COMB": lc.id, "ชื่อ": lc.title,
+        "ตัวคูณ": " + ".join(f"{f:g}×LC{k}" for k, f in lc.factors.items()),
+        "ประเภท": "ใช้งาน (service) — ไม่ใช้ออกแบบกำลัง" if M.is_service(lc.id) else "กำลัง (strength)",
+        "แรงด้านข้าง": "มี" if M.is_lateral(lc.id) else "-"} for lc in M.combos()]),
+        hide_index=True, width="stretch")
+    st.caption("combo ที่ตัวคูณทุกตัว = 1.0 หรือชื่อมีคำว่า SERVICE / ASD / DEFLECTION ถือเป็น service "
+               "และถูกตัดออกจากการออกแบบกำลังโดยอัตโนมัติ (แก้ได้ในหน้าออกแบบ)")
+for name, mat in M.material.items():
+    if "STRENGTH FCU" in mat:
+        st.warning(f"วัสดุ {name}: STRENGTH FCU = {mat['STRENGTH FCU']:.1f} MPa เป็นกำลังแท่ง**ลูกบาศก์** (BS) — "
+                   "ACI ใช้ f′c แท่งทรงกระบอก (ต่ำกว่า) กำหนด f′c เองในหน้าออกแบบ")
+if not any(M.is_lateral(c.id) for c in M.combos()):
+    st.info("โมเดลนี้มีแต่น้ำหนักแนวดิ่ง (ไม่พบลม/แผ่นดินไหว/แรงด้านข้าง)")
+
+# ---------------------------------------------------------------- ขั้นที่ 2
+st.header("ขั้นที่ 2 · ผลวิเคราะห์ (.anl)")
+st.caption("ไฟล์ .anl ต้องมีตาราง MEMBER END FORCES — ในไฟล์ .std ใช้ `PERFORM ANALYSIS PRINT ALL` "
+           "หรือ `PRINT MEMBER FORCES` · หน่วยอ่านจากบรรทัด `ALL UNITS ARE` ของตาราง")
+up2 = st.file_uploader("ไฟล์ผลวิเคราะห์ (.anl)", type=["anl", "txt"], key="sm_anl")
+if up2 is not None and st.session_state.get("anl_name") != up2.name + str(up2.size):
+    st.session_state.anl_text = _read(up2)
+    st.session_state.anl_name = up2.name + str(up2.size)
+if not st.session_state.get("anl_text"):
+    st.info("อัปโหลดไฟล์ .anl เพื่อไปขั้นที่ 3")
+    st.session_state.pop("staad_forces", None)
+    st.stop()
+try:
+    Fo = S.parse_anl(st.session_state.anl_text)
+except ValueError as e:
+    st.error(str(e))
+    st.stop()
+if not Fo.data:
+    st.error("ไม่พบตาราง MEMBER END FORCES ในไฟล์ .anl — เพิ่ม PRINT MEMBER FORCES ในไฟล์ .std แล้วรันใหม่")
+    st.stop()
+
+unknown = [m for m in Fo.members() if m not in M.members]
+if unknown:
+    st.error(f"member {unknown[:10]} อยู่ใน .anl แต่ไม่มีใน .std — ไฟล์ไม่ใช่โมเดลเดียวกัน?")
+    st.stop()
+st.session_state.staad_forces = Fo
+if st.session_state.get("anl_name") == "example":
+    st.info("ผลวิเคราะห์ตัวอย่างมีเฉพาะเสา 11 และ 12 — จำลองรูปแบบ .anl จากตาราง Beam End Force ของโมเดลนี้ "
+            "(ยังไม่ใช่ไฟล์ .anl จริงจาก STAAD)")
+fcols = [m for m in cols if any((m, lc) in Fo.data for lc in Fo.loads())]
+k = st.columns(4)
+k[0].metric("หน่วยในตาราง", ", ".join(Fo.units))
+k[1].metric("member ที่มีแรง", len(Fo.members()))
+k[2].metric("เสาที่มีแรง", f"{len(fcols)}/{len(cols)}")
+k[3].metric("load ในผล", len(Fo.loads()))
+nocomb = [c for c in M.strength_combos() if c not in Fo.loads()]
+if nocomb:
+    st.warning(f"combo กำลัง {nocomb} ไม่มีในผลวิเคราะห์")
+
+# ตรวจสมดุลของเสาทุกต้นด้วยความยาวจาก geometry (ยืนยันแกน/หน่วย/การจับคู่ start-end)
+bad = []
+for m in fcols:
+    for lc in Fo.loads():
+        if (m, lc) in Fo.data:
+            try:
+                ok, err = S.check_equilibrium(M, Fo, m, lc)
+            except KeyError:
+                ok, err = False, float("nan")
+            if not ok:
+                bad.append((m, lc, err))
+if bad:
+    st.error(f"สมดุลของเสาไม่ตรง {len(bad)} รายการ (เช่น member {bad[0][0]} load {bad[0][1]}) — "
+             "อาจมีแรงกระทำกลางเสา หรือไฟล์ .anl ไม่ตรงกับ .std")
+else:
+    st.success("ตรวจสมดุลเสาทุกต้นทุก load ผ่าน (|F|·L = |Mt| ± |Mb| ด้วยความยาวจาก geometry) — "
+               "แกน หน่วย และ start/end ถูกต้อง")
+
+pick = st.selectbox("ดูแรงของเสา", fcols, key="sm_pick", format_func=lambda m: f"member {m}")
+rows = []
+for lc in Fo.loads():
+    if (pick, lc) not in Fo.data:
+        continue
+    f = S.column_forces(M, Fo, pick, lc, C.from_staad)
+    rows.append({"load": lc, "ชื่อ": M.loads[lc].title if lc in M.loads else "",
+                 "ใช้ออกแบบ": "✓" if lc in M.strength_combos() else "",
+                 "P = Fx start (kN)": f["Pu"] / 1e3, "|Mz| start / end (kN·m)": f"{f['Mxb'] / 1e6:.3f} / {f['Mxt'] / 1e6:.3f}",
+                 "|My| start / end (kN·m)": f"{f['Myb'] / 1e6:.3f} / {f['Myt'] / 1e6:.3f}",
+                 "|Fy| (kN)": f["Vuy"] / 1e3, "|Fz| (kN)": f["Vux"] / 1e3})
+st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
+             column_config={c: st.column_config.NumberColumn(format="%.3f")
+                            for c in ("P = Fx start (kN)", "|Fy| (kN)", "|Fz| (kN)")})
+page_link("views/column.py", label="ไปขั้นที่ 3 · ออกแบบเสา", icon="🏛️")

@@ -10,7 +10,9 @@ import streamlit.components.v1 as components
 from rcbeam import units as u
 from rcbeam.calsheet import ProjectInfo
 from rcbeam.col_calsheet import build_column_calsheet, column_svg
+from rcbeam.nav import page_link
 from rcbeam.colcheck import C, ColumnInput, Combo, PASS, FAIL, run
+import staad_io as S_IO  # noqa: E402  (skill scripts อยู่ใน sys.path จาก rcbeam.colcheck)
 
 BARS = [12, 16, 19.1, 20, 25, 28, 32, 36]
 TIES = [6, 9, 9.5, 10, 12]
@@ -19,6 +21,32 @@ CURV = ["auto", "single", "double"]
 st.title("ออกแบบ/ตรวจสอบเสา คสล. ตาม ACI 318M-19")
 st.caption("หน้าตัดสี่เหลี่ยม ปลอกเดี่ยว · โครง non-sway · 3D interaction (P–Mz–My) · ชื่อแกนตาม STAAD.Pro · "
            "ความชะลูด + ขยายโมเมนต์ · แรงเฉือนสองทิศ · ใช้ solver ของ skill rc-column-aci318m19")
+
+# ---------------------------------------------------------------- แหล่งข้อมูล (ต้องอยู่ก่อน sidebar เพื่อเติมค่า)
+SM, SF = st.session_state.get("staad_model"), st.session_state.get("staad_forces")
+SRC = (["model"] if SM is not None and SF is not None else []) + ["manual"]
+src = st.radio("แหล่งข้อมูล", SRC, horizontal=True, key=f"c_src_{len(SRC)}",
+               format_func=lambda x: {"model": "โมเดล STAAD (.std + .anl) — ขั้นที่ 1–2",
+                                      "manual": "วางตาราง / ป้อนเอง"}[x])
+sel = None
+for _k, _v in (("c_h", 0.40), ("c_b", 0.40), ("c_L", 5.0), ("c_lux", 4.5), ("c_luy", 4.5)):
+    st.session_state.setdefault(_k, _v)
+if src == "model":
+    mcols = [m for m in SM.columns() if any((m, lc) in SF.data for lc in SF.loads())]
+    sel = st.selectbox("เสา (member ในโมเดล)", mcols, key="c_member",
+                       format_func=lambda m: f"member {m} · {SM.prism.get(m, (0, 0))[0]:.0f}×"
+                                             f"{SM.prism.get(m, (0, 0))[1]:.0f} · L {SM.length(m) / 1000:.2f} m")
+    if st.session_state.get("c_member_prev") != (sel, id(SM)):
+        if sel in SM.prism:
+            st.session_state.c_h = SM.prism[sel][0] / 1000
+            st.session_state.c_b = SM.prism[sel][1] / 1000
+        st.session_state.c_L = SM.length(sel) / 1000
+        st.session_state.c_lux = st.session_state.c_luy = SM.length(sel) / 1000
+        st.session_state.c_member_prev = (sel, id(SM))
+    st.caption("YD, ZD และความยาวเติมจากโมเดลแล้ว (แก้ได้ในแถบข้าง) · l_u เริ่มต้น = ความยาว c/c "
+               "(อนุรักษ์นิยม — ลดได้ตามระยะช่องว่างจริงระหว่างคาน)")
+elif SM is None or SF is None:
+    page_link("views/staad_model.py", label="หรือนำเข้าโมเดล STAAD (.std + .anl) ก่อน", icon="🧊")
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
@@ -39,9 +67,9 @@ with st.sidebar:
                            disabled=abs(fy - 420) > 0.5, key="c_g420")
 
     st.header("หน้าตัดและเหล็ก")
-    h = u.m_to_mm(st.number_input("YD (m) — ความลึกตามแกน local y", 0.15, 2.0, 0.40, 0.05,
+    h = u.m_to_mm(st.number_input("YD (m) — ความลึกตามแกน local y", min_value=0.15, max_value=2.0, step=0.05,
                                   format="%.2f", key="c_h", help="ตรงกับ YD ในหน้าต่าง Prismatic ของ STAAD"))
-    b = u.m_to_mm(st.number_input("ZD (m) — ความกว้างตามแกน local z", 0.15, 2.0, 0.40, 0.05,
+    b = u.m_to_mm(st.number_input("ZD (m) — ความกว้างตามแกน local z", min_value=0.15, max_value=2.0, step=0.05,
                                   format="%.2f", key="c_b", help="ตรงกับ ZD ในหน้าต่าง Prismatic ของ STAAD"))
     cover = st.number_input("cover (mm)", 20.0, 100.0, 40.0, 5.0, key="c_cov")
     cover_to = st.radio("cover วัดถึง", ["tie", "long"], horizontal=True, key="c_covto",
@@ -69,11 +97,11 @@ with st.sidebar:
 
     st.header("ความยาวและความชะลูด")
     c1, c2 = st.columns(2)
-    lu_x = u.m_to_mm(c1.number_input("l_u ของ Mz (m)", 0.5, 30.0, 4.5, 0.1, key="c_lux"))
-    lu_y = u.m_to_mm(c2.number_input("l_u ของ My (m)", 0.5, 30.0, 4.5, 0.1, key="c_luy"))
+    lu_x = u.m_to_mm(c1.number_input("l_u ของ Mz (m)", min_value=0.5, max_value=30.0, step=0.1, key="c_lux"))
+    lu_y = u.m_to_mm(c2.number_input("l_u ของ My (m)", min_value=0.5, max_value=30.0, step=0.1, key="c_luy"))
     k_x = c1.number_input("k ของ Mz", 0.5, 1.0, 1.0, 0.05, key="c_kx")
     k_y = c2.number_input("k ของ My", 0.5, 1.0, 1.0, 0.05, key="c_ky")
-    L = u.m_to_mm(st.number_input("ความยาวชิ้นส่วน c/c (m)", 0.5, 30.0, 5.0, 0.1, key="c_L",
+    L = u.m_to_mm(st.number_input("ความยาวชิ้นส่วน c/c (m)", min_value=0.5, max_value=30.0, step=0.1, key="c_L",
                                   help="ใช้ตัดสินทิศการดัดจากแรงเฉือน |V|·L"))
     beta = st.number_input("βdns", 0.0, 1.0, 0.6, 0.05, key="c_beta",
                            help="สัดส่วนแรงอัดค้าง (sustained) ต่อแรงอัดประลัยทั้งหมด")
@@ -128,11 +156,37 @@ def val(x, d=0.0):
 st.info("ออกแบบเป็น **เสาในโครง non-sway** — ผู้ออกแบบต้องยืนยันเองว่าโครงไม่เซ (Q ≤ 0.05 ตาม ACI 6.6.4.3 "
         "หรือมีผนังรับแรงเฉือน/โครงค้ำยัน) · 🚧 **Incoming:** ระบบตรวจ sway / non-sway และการออกแบบเสา sway")
 st.header("ข้อมูลแรง")
-mode = st.radio("รูปแบบข้อมูลแรง", ["staad", "app"], horizontal=True, key="c_mode",
+mode = "model" if src == "model" else st.radio("รูปแบบข้อมูลแรง", ["staad", "app"], horizontal=True, key="c_mode",
                 format_func=lambda x: {"staad": "STAAD.Pro member end forces (แนะนำ)",
                                        "app": "ป้อน Mz / My เอง"}[x])
 units_ok = True
-if mode == "staad":
+if mode == "model":
+    strength = SM.strength_combos()
+    avail = [lc for lc in SF.loads() if (sel, lc) in SF.data]
+    c1, c2 = st.columns(2)
+    use = c1.multiselect("combo ที่ใช้ออกแบบ (ตัด combo ใช้งาน/primary load ออกแล้ว)", avail,
+                         [lc for lc in avail if lc in strength], key=f"c_muse_{sel}",
+                         format_func=lambda x: f"{x}: {SM.loads[x].title}" if x in SM.loads else str(x))
+    c2.markdown("**ตรวจเครื่องหมาย P:** ใช้ combo ที่ไม่มีแรงด้านข้าง (อ่านจากนิยาม load ในไฟล์ .std)")
+    a_, b_ = SM.members[sel]
+    st.caption(f"member {sel}: start = N{a_} ({'ล่าง' if SM.bottom_top(sel)[0] == a_ else 'บน'}), end = N{b_} · "
+               f"P = Fx ที่ N{a_} · Mz คู่ Fy (ความลึก YD) · My คู่ Fz (ความลึก ZD) · หน่วยจาก .anl: "
+               f"{', '.join(SF.units)}")
+    rows_in = []
+    for lc in use:
+        f = S_IO.column_forces(SM, SF, sel, lc, C.from_staad)
+        f = {k: v / (M if k[0] == "M" else F) for k, v in f.items()}            # N, N·mm → หน่วยที่แสดง
+        rows_in.append((str(lc), f, not SM.is_lateral(lc), "auto", "auto"))
+    if rows_in:
+        with st.expander(f"ค่าที่ใช้คำนวณ ({fu}, {mu})", expanded=True):
+            st.dataframe(pd.DataFrame([{"combo": n, f"P = Fx start ({fu})": f["Pu"],
+                                        f"|Mz| end ({mu})": f["Mxt"], f"|Mz| start ({mu})": f["Mxb"],
+                                        f"|My| end ({mu})": f["Myt"], f"|My| start ({mu})": f["Myb"],
+                                        f"|Fy| ({fu})": f["Vuy"], f"|Fz| ({fu})": f["Vux"]}
+                                       for n, f, *_ in rows_in]), hide_index=True, width="stretch")
+    else:
+        st.warning("ยังไม่ได้เลือก combo")
+elif mode == "staad":
     st.markdown("**วิธีใช้:** ใน STAAD เปิดตาราง **Beam End Force** → เลือกแถวของเสาต้นนี้ "
                 "(ทุก L/C ทั้ง 2 node) → **Ctrl+C** → วางทับในช่องข้างล่าง (**Ctrl+V**) "
                 "ไม่ต้องแก้เครื่องหมายหรือหน่วย ถ้าคัดลอกหัวตารางมาด้วย แอปจะอ่านหน่วยให้เอง")
@@ -273,7 +327,8 @@ if not ready:
     st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อเครื่องหมาย P ถูกต้องและเลือกหน่วยแล้ว")
     st.stop()
 if not st.session_state.get("col_go"):
-    st.info("กรอกข้อมูลแล้วกด **ตรวจสอบเสา** — ค่าเริ่มต้นคือตัวอย่างเสาชะลูด S1 ในเอกสารของสกิล")
+    st.info("กรอกข้อมูลแล้วกด **ตรวจสอบเสา**" + ("" if src == "model" else
+            " — ค่าเริ่มต้นคือตัวอย่างเสาชะลูด S1 ในเอกสารของสกิล"))
     st.stop()
 
 combos = [Combo(n, f["Pu"] * F, f["Mxt"] * M, f["Mxb"] * M, f["Myt"] * M, f["Myb"] * M,

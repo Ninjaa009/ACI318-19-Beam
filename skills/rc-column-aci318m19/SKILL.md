@@ -65,11 +65,20 @@ description: ออกแบบและตรวจสอบเสา คสล
   | Fx (start) | Pu | บวก = อัด |
 
   `STAAD_AXIS = {"x": "z", "y": "y"}` ใช้แปลงชื่อแกนภายใน → ชื่อ STAAD
+- **ทางหลัก — อ่านไฟล์ STAAD โดยตรง (`scripts/staad_io.py`):** ถ้าผู้ใช้มีไฟล์ `.std` และ `.anl` ให้ใช้ทางนี้ก่อน
+  ไม่ต้องเดาอะไร: `parse_std(text)` → Model (joint, member incidences, PRIS YD/ZD, BETA, supports, LOAD/LOAD COMB/REPEAT
+  พร้อมหน่วย `UNIT`), `parse_anl(text)` → Forces (ตาราง MEMBER END FORCES ทุกชุด หน่วยจาก `ALL UNITS ARE`; ไม่มีบรรทัดหน่วย →
+  หยุด ไม่เดา), `column_forces(model, forces, member, load, from_staad)` (P = Fx ที่ start node ตาม incidences),
+  `check_equilibrium(...)` ตรวจ Mz_s + Mz_e + Fy_e·L = 0 และ My_s + My_e − Fz_e·L = 0 ด้วย L จาก geometry
+  (ยืนยันแกน/หน่วย/start-end), `Model.strength_combos()` ตัด combo ใช้งาน (ตัวคูณทุกตัว = 1.0 หรือชื่อ SERVICE/ASD/
+  DEFLECTION) และ primary load ออก, `Model.is_lateral(lid)` บอกว่ามีแรงด้านข้างหรือไม่ (ใช้เลือก combo ตรวจเครื่องหมาย P)
+  — ⚠️ STRENGTH FCU ใน .std เป็นกำลังลูกบาศก์ ไม่ใช่ f′c; ⚠️ รูปแบบ .anl ทดสอบกับไฟล์จำลอง (`references/staad_example/`)
+  ยังต้องยืนยันกับไฟล์ .anl จริง
 - `from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, flip_axial)`: แปลง Member End Forces (แกน local) ตามตารางข้างบน — **ไม่ขึ้นกับ beta** เพราะแรงและ YD/ZD อยู่ในแกน local เดียวกัน
 - **วางตาราง Beam End Force ทั้งก้อน:** `parse_staad_end_forces(text)` อ่านแถว Beam, L/C, Node, Axial, Shear-Y, Shear-Z, Torsion, Moment-Y, Moment-Z (+ หน่วยจากหัวตาราง เช่น kg / kN-m — STAAD มักแสดงแรงกับโมเมนต์คนละหน่วย ต้องแปลงด้วย `STAAD_FORCE_UNITS` / `STAAD_MOMENT_UNITS` ก่อนใช้), `guess_start_node(rows)` เดา start node จาก Fx > 0, `pair_staad_rows(rows, start_node)` จับคู่แถว start/end ต่อ L/C แล้วเรียก `from_staad`; ถ้าคัดลอกมาไม่มีหัวตาราง `staad_units_from_statics(pairs, L)` หาคู่หน่วยที่ทำให้ |F|·L = |Mt| ± |Mb|; `staad_statics_errors(pairs, fu, mu, L)` เป็นด่านตรวจหน่วย/ความยาวก่อนออกแบบ (หน่วยหรือ L ผิด → หยุดที่เดียว); `staad_suggest(pairs)` แนะนำคู่หน่วยกับความยาวเสาที่สมดุล (โค้งสองทาง, 1.5–15 m)
 - `check_axial_sign(rows)`: **combo แนวดิ่งล้วน (D, L) ต้องได้ P > 0** ไม่เช่นนั้นหยุด (เครื่องหมาย P น่าจะกลับ เช่น อ่าน Fx ที่ end node) — ให้ผู้ใช้ระบุอย่างน้อย 1 combo แนวดิ่ง
 - `curvature_ratio` ต้องได้ |V|·L ตรงกับ |Mt|+|Mb| หรือ ||Mt|−|Mb|| ภายใน 10% (`CURV_TOL`) ไม่เช่นนั้น **แจ้งให้ระบุ single/double เอง** — ใช้จับการจับคู่ V↔M ผิดแกน หรือมีแรงกระทำระหว่างช่วง
-- เสาไม่จัตุรัส (b ≠ h): ต้องยืนยันว่า h = YD และ b = ZD ก่อนคำนวณ (สลับด้านแล้วความจุผิด)
+- เสาไม่จัตุรัส (b ≠ h): ต้องยืนยันว่า h = YD และ b = ZD ก่อนคำนวณ (สลับด้านแล้วความจุผิด) — อ่านจาก PRIS ใน .std หรือคำนวณกลับจาก Beam Property: YD = √(12·Iz/Ax), ZD = √(12·Iy/Ax) (อย่าเชื่อชื่อ Profile)
 - Δo ของตาราง Q = ค่าที่มีเครื่องหมาย บน − ล่าง (ไม่ใช่ผลต่างของขนาด)
 
 ## 4. กำลังหน้าตัด (3D interaction)
@@ -144,7 +153,7 @@ description: ออกแบบและตรวจสอบเสา คสล
 
 ## 10. การตรวจสอบความถูกต้อง
 
-`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 80/80** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C11 sign convention/STAAD, C12 วางตาราง Beam End Force + หน่วยผสม) · ระบบ sway (incoming): `python3 scripts/incoming/test_sway.py` — ผ่าน 26/26 (Q, จำแนกชั้น ตาราง RCDC, ด่าน non-sway + bypass, ทิศเซตาม beta)
+`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 94/94** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C11 sign convention/STAAD, C12 วางตาราง Beam End Force + หน่วยผสม, C13 อ่านไฟล์ .std/.anl + สมดุลเสาด้วย L จาก geometry) · ระบบ sway (incoming): `python3 scripts/incoming/test_sway.py` — ผ่าน 26/26 (Q, จำแนกชั้น ตาราง RCDC, ด่าน non-sway + bypass, ทิศเซตาม beta)
 
 - ตรงกับ RCDC: φPn,max 1,232.14 kN; φMcap แกนเดียว 54.22 vs 54.16 kN·m; φVc 50.79/52.28 kN; φVs 107.37 kN; Q 0.011 (incoming)
 - **ยังไม่ทราบสาเหตุ:** φMcap สองแกน (มุม 33.1°) solver 54.26 vs RCDC 53.66 kN·m (RCDC ต่ำกว่า 1.1%)
@@ -155,6 +164,8 @@ description: ออกแบบและตรวจสอบเสา คสล
 ## ไฟล์
 
 - `scripts/column.py` — solver (MPa–mm–N)
+- `scripts/staad_io.py` — อ่านไฟล์ STAAD `.std` / `.anl`
+- `references/staad_example/` — โมเดลตัวอย่างโครง 3×2 ช่วง (.std จริง + .anl จำลองของเสา 11, 12)
 - `scripts/test_column.py` — เคสทดสอบ + สูตรปิดอิสระ
 - `contour_at(sec, Pu)` ใน column.py — เส้นตัด surface ที่ Pu สำหรับวาดกราฟ Mx–My
 - `scripts/example_slender.py` — รายการคำนวณมือเสาชะลูด S1 (อิสระจาก solver)

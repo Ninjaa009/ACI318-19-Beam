@@ -264,6 +264,39 @@ def run():
     check_true("C12", "kN/kN-m แยกจาก kg/kg-m ด้วยสมดุลไม่ได้ → ให้ผู้ใช้เลือก", ("kN", "kN-m") in g1 and len(g1) > 1)
     rows3, _, _ = C.parse_staad_end_forces("5   101 1.2D+1.6L   3   100   1   2   0   3   4")
     check_true("C12", "L/C มีชื่อต่อท้าย", rows3 and rows3[0]["lc"] == "101 1.2D+1.6L" and rows3[0]["node"] == "3")
+
+    # ---------------- C13 อ่านไฟล์ STAAD .std + .anl ----------------
+    import staad_io as SIO
+    ex = Path(__file__).resolve().parent.parent / "references" / "staad_example"
+    Mo = SIO.parse_std((ex / "frame_3x2.std").read_text())
+    check_true("C13", ".std: 24 joint, 29 member, เสา 1–12", (len(Mo.joints), len(Mo.members), Mo.columns())
+               == (24, 29, list(range(1, 13))))
+    check_true("C13", "PRIS เสา YD 500 ZD 400 mm, คาน YD 500 ZD 300 mm, L เสา 3,500 mm",
+               Mo.prism[12] == (500.0, 400.0) and Mo.prism[20] == (500.0, 300.0) and abs(Mo.length(12) - 3500) < 1e-9)
+    check_true("C13", "start node ของเสา 12 = N12 (ล่าง)", Mo.members[12] == (12, 24) and Mo.bottom_top(12) == (12, 24))
+    check_true("C13", "FLOOR LOAD 2.88 kN/m² (หน่วย METER KN → N/mm²)",
+               abs(Mo.loads[2].items[0]["w"] + 0.00288) < 1e-12)
+    check_true("C13", "COMB 101, 102 = กำลัง; 103 (ตัวคูณ 1.0, SERVICE) = ใช้งาน", Mo.strength_combos() == [101, 102]
+               and Mo.is_service(103))
+    check_true("C13", "ไม่มีแรงด้านข้างในทุก combo", not any(Mo.is_lateral(c) for c in (101, 102, 103)))
+    check_true("C13", "FCU 25 MPa อ่านเป็น MPa", abs(Mo.material["CONC_C25"]["STRENGTH FCU"] - 25) < 1e-9)
+    Fo = SIO.parse_anl((ex / "frame_3x2_cols11_12.anl").read_text())
+    check_true("C13", ".anl: หน่วย KN METE, เสา 11–12, load 1–3 และ 101–103 (ข้ามหัวหน้ากระดาษ)",
+               Fo.units == ["KN METE"] and Fo.members() == [11, 12] and Fo.loads() == [1, 2, 3, 101, 102, 103])
+    f = SIO.column_forces(Mo, Fo, 11, 102, C.from_staad)
+    check("C13", "เสา 11 COMB 102: P = Fx(N11) = 13,377.765 kg (kN)", f["Pu"] / 1e3, 13377.765 * 9.80665e-3, 0.001)
+    check("C13", "เสา 11 COMB 102: |My| end = 28.560 kN·m", f["Myt"] / 1e6, 28.560, 1e-6)
+    check_true("C13", "สมดุลเสาทุก load ด้วย L จาก geometry",
+               all(SIO.check_equilibrium(Mo, Fo, m, lc)[0] for m in (11, 12) for lc in Fo.loads()))
+    d = Fo.data[(12, 1)]
+    check("C13", "น้ำหนักเสาเอง = Fx(N12) + Fx(N24) = 0.5×0.4×3.5×24 (kN)", (d[12][0] + d[24][0]) / 1e3, 16.8, 0.01)
+    check_true("C13", "ids: '1 TO 7 BY 3 10' → [1, 4, 7, 10]", SIO.ids("1 TO 7 BY 3 10") == [1, 4, 7, 10])
+    try:
+        SIO.parse_anl("MEMBER END FORCES\n  1 1 1 1 2 3 4 5 6")
+        nounit = False
+    except ValueError:
+        nounit = True
+    check_true("C13", ".anl ไม่มีบรรทัดหน่วย → หยุด (ไม่เดาหน่วย)", nounit)
     return ROWS
 
 
