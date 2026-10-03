@@ -13,6 +13,8 @@ if str(_SKILL) not in sys.path:
 import column as C  # noqa: E402
 
 PASS, FAIL, NOT_CHECKED, NA = "ผ่าน", "ไม่ผ่าน", "ยังไม่ตรวจ", "ไม่มีข้อมูล"
+NONSWAY_NOTE = ("สมมติเป็นโครง non-sway — ผู้ออกแบบต้องยืนยันเอง (Q ≤ 0.05 ตาม ACI 6.6.4.3) · "
+                "ระบบตรวจ sway: incoming")
 
 
 @dataclass
@@ -41,10 +43,6 @@ class ColumnInput:
     beta_dns: float = 0.6
     r_method: str = "exact"
     EI_method: str = "a"
-    stories: list = None         # แถวข้อมูลชั้นสำหรับ classify_stories (ทุกชั้น ทุกทิศ ทุก combo)
-    story_name: str = ""         # ชั้นที่เสาต้นนี้อยู่
-    sway_bypass: str = ""        # เหตุผลที่วิศวกรยืนยัน non-sway เอง (ว่าง = ไม่ข้าม)
-    dir_labels: dict = None      # ชื่อทิศการเซที่แสดงผล เช่น {"y": "X", "x": "Z"} (แกนโลก STAAD)
     omf: bool = False            # §18.3.3 (OMF ใน SDC B)
     cover_min: float = 40.0
 
@@ -133,16 +131,10 @@ def check_combo(inp, sec, cb):
 
 def run(inp, combos):
     sec = inp.section()
-    out = {"sec": sec, "inp": inp, "classes": [], "Q": [], "sway": False}
-    out["classes"] = C.classify_stories(inp.stories or [])
-    mine = [c for c in out["classes"] if c.story == str(inp.story_name)]
-    out["Q"] = sorted(mine, key=lambda c: c.direction)         # ของชั้นที่เสาอยู่
-    out["sway"] = any(c.status == "sway" for c in mine)
-    # ด่านบังคับ: ต้องเป็น non-sway ครบทั้งสองทิศก่อนออกแบบ (sway ปิดปรับปรุง)
-    out["gate_ok"], out["gate_msgs"] = C.nonsway_gate(out["classes"], inp.story_name,
-                                                      inp.sway_bypass, inp.dir_labels)
-    out["bypass"] = out["gate_ok"] and bool(out["gate_msgs"])
-    out["results"] = [check_combo(inp, sec, cb) for cb in combos] if out["gate_ok"] else []
+    out = {"sec": sec, "inp": inp}
+    # ระบบตรวจ sway / non-sway ถูกถอดออกจากแอป (incoming) — ถือว่าเป็นโครง non-sway
+    # ฟังก์ชัน classify_stories / nonsway_gate ยังอยู่ใน skill สำหรับนำกลับมาใช้
+    out["results"] = [check_combo(inp, sec, cb) for cb in combos]
     good = [r for r in out["results"] if not r.error]
     out["gov"] = max(good, key=lambda r: r.ratio) if good else None
     out["gov_shear"] = max(good, key=lambda r: r.shear_ratio) if good else None
@@ -162,18 +154,7 @@ SHEAR_NAME = {"y": "Fy (คู่กับ Mz)", "x": "Fz (คู่กับ My
 
 
 def summary(out):
-    rows = []
-    if out["Q"]:
-        for c in out["Q"]:
-            st = {"non-sway": PASS, "sway": "หยุด: sway (ไม่รองรับ)"}.get(c.status, c.status)
-            val = ("ไม่มี combo ที่มีแรงด้านข้าง" if math.isnan(c.Q_max) else
-                   f"Q max = {c.Q_max:.4f} (combo {c.combo})" +
-                   (f", Q/0.35 = {c.Q_upper:.4f}" if c.Q_upper is not None else ""))
-            lab = (out["inp"].dir_labels or {}).get(c.direction, c.direction.upper())
-            rows.append((f"Sway ชั้น {c.story} ทิศ {lab}", val, st, "6.6.4.3"))
-    for m in out.get("gate_msgs", []):
-        rows.append(("ด่านตรวจ sway ก่อนออกแบบ", m,
-                     C.BYPASS_LABEL if out.get("bypass") else FAIL, "6.6.4.3"))
+    rows = [("โครง sway / non-sway", NONSWAY_NOTE, NOT_CHECKED, "6.6.4.3")]
     res = [r for r in out.get("results", []) if not r.error]
     for r in out.get("results", []):
         if r.error:

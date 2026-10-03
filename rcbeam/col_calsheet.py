@@ -299,48 +299,13 @@ def build_column_calsheet(proj, out):
     D.sub("แรงประลัย (Factored Loads) หน่วย kN, kN·m")
     D.raw(f'<table class="grid num full"><thead><tr>{hdr}</tr></thead><tbody>{rows}</tbody></table>')
 
-    D.h("การจำแนกโครง sway / non-sway", "Stability Index")
-    lab = lambda d: (inp.dir_labels or {}).get(d, d.upper())  # noqa: E731
-    if out.get("bypass"):
-        D.raw(f'<div class="result"><b>ข้ามการตรวจ sway — วิศวกรยืนยันว่าเป็นโครง non-sway</b><br>'
-              f'{_e(out["gate_msgs"][0])}<br><i>ผลการออกแบบใช้ได้เฉพาะเมื่อโครงเป็น non-sway จริง '
-              "วิศวกรผู้รับผิดชอบต้องแนบหลักฐานประกอบ</i></div>")
-    if out["classes"]:
-        D.p("ตรวจทุกชั้นทุกทิศ ใช้ Q สูงสุดจากทุก combination ที่มีแรงด้านข้าง; Δ<sub>o</sub> จากการวิเคราะห์"
-            "ลำดับหนึ่งของโมเดลที่ลด stiffness (คาน 0.35I<sub>g</sub>, เสา 0.70I<sub>g</sub>, ACI 6.6.3.1.1)")
-        D.eq(r"Q = \frac{\sum P_u\,\Delta_o}{V_{us}\,l_c} \leq 0.05", ref="ACI 6.6.4.3(b)",
-             note="→ non-sway")
-        trs = []
-        for c in out["classes"]:
-            mark = (' style="font-weight:700"' if c.story == str(inp.story_name) else "")
-            for cb, P, V, do, lc, Q in c.rows:
-                trs.append(f"<tr{mark}><td>{_e(c.story)}</td><td>{lab(c.direction)}</td>"
-                           f"<td>{_e(cb)}</td><td>{kN(P):,.1f}</td><td>{kN(V):,.2f}</td>"
-                           f"<td>{do:g}</td><td>{lc / 1000:g}</td><td>{Q:.4f}</td>"
-                           f"<td>{_e(c.status) if cb == c.combo else ''}</td></tr>")
-            if not c.rows:
-                trs.append(f"<tr{mark}><td>{_e(c.story)}</td><td>{lab(c.direction)}</td>"
-                           f"<td colspan='7'>{_e(c.status)}</td></tr>")
-        D.raw('<table class="grid num full"><thead><tr><th>ชั้น</th><th>ทิศ</th><th>Combo</th>'
-              "<th>ΣP<sub>u</sub> (kN)</th><th>V<sub>us</sub> (kN)</th><th>Δ<sub>o</sub> (mm)</th>"
-              "<th>l<sub>c</sub> (m)</th><th>Q</th><th>ผล</th></tr></thead><tbody>"
-              + "".join(trs) + "</tbody></table>")
-        for c in out["Q"]:
-            if not c.rows:
-                continue
-            g = next(r for r in c.rows if r[0] == c.combo)
-            D.eq(rf"Q_{{{lab(c.direction)}}} = \frac{{{_n(kN(g[1]), 1)}{X}{g[3]:g}}}{{{_n(kN(g[2]), 2)}"
-                 rf"{X}{_n(g[4], 0)}}} = {c.Q_max:.4f}\ {_le(c.Q_max <= 0.05)}\ 0.05",
-                 ref="ACI 6.6.4.4.1", check=c.status == "non-sway",
-                 note=f"ชั้น {_e(c.story)} ทิศ {lab(c.direction)}: {_e(c.status)}")
-            for n in c.notes:
-                D.p(f"<i>หมายเหตุ: {_e(n)}</i>")
-        D.p(f"เสาต้นนี้อยู่ชั้น <b>{_e(inp.story_name)}</b> — M<sub>z</sub> ใช้ผลการเซทิศ "
-            f"{lab('y')} และ M<sub>y</sub> ใช้ผลการเซทิศ {lab('x')}")
-    else:
-        D.p("ไม่ได้ป้อนข้อมูลชั้น — สมมติว่าเป็นโครง non-sway (ต้องยืนยันด้วย Q ≤ 0.05 ตาม ACI 6.6.4.3)")
-    if out["sway"]:
-        D.p("<b>โครงเป็น sway — อยู่นอกขอบเขตของโปรแกรม หยุดการตรวจ</b>")
+    D.h("โครง sway / non-sway", "Stability")
+    D.p("ออกแบบโดยสมมติว่าเป็น<b>โครง non-sway</b> — วิศวกรผู้ออกแบบต้องยืนยันเองว่า "
+        "Q = ΣP<sub>u</sub>Δ<sub>o</sub>/(V<sub>us</sub>l<sub>c</sub>) ≤ 0.05 ทุกชั้นทุกทิศ (ACI 6.6.4.3) "
+        "หรือโครงมีระบบค้ำยันด้านข้าง · ถ้าเป็นโครง sway ผลการออกแบบนี้ใช้ไม่ได้")
+
+    if out["gov"] is None:
+        D.p("<b>ไม่มี combination ที่ตรวจได้ — ดูข้อผิดพลาดในตารางสรุป</b>")
         D.raw(sign_block(p))
         return page_html(p, D.html(), "RC COLUMN", "RC-Column", "ACI 318M-19 · RC Column Design")
 

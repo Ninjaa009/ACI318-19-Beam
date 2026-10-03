@@ -5,12 +5,8 @@ from rcbeam.calsheet import ProjectInfo
 from rcbeam.col_calsheet import build_column_calsheet
 from rcbeam.colcheck import ColumnInput, Combo, run
 
-STORY = [dict(story="1", direction=d, combo="W", sumPu=24000e3, Vus=900e3, delta_o=3.2,
-              lc=5000, reduced=True) for d in ("x", "y")]
-
-
 def s1_input(**kw):
-    args = dict(lu_x=4500, lu_y=4500, L=5000, stories=STORY, story_name="1")
+    args = dict(lu_x=4500, lu_y=4500, L=5000)
     args.update(kw)
     return ColumnInput(400, 400, 28, 420, 420, 40, 20, 3, 3, 10, 250, **args)
 
@@ -27,43 +23,19 @@ def test_s1_matches_worked_example():
     assert all(row[2] != "ไม่ผ่าน" for row in out["summary"])
 
 
-def test_sway_stops_checks():
-    stories = [dict(STORY[0], delta_o=40.0), STORY[1]]
-    out = run(s1_input(stories=stories), [S1])
-    assert out["sway"] and out["results"] == []
-
-
-def test_design_blocked_without_sway_check():
-    out = run(s1_input(stories=[]), [S1])
-    assert not out["gate_ok"] and out["results"] == [] and len(out["gate_msgs"]) == 2
-    out = run(s1_input(stories=STORY[:1]), [S1])          # มีแต่ทิศ x
-    assert not out["gate_ok"] and "ทิศ y" in out["gate_msgs"][0]
-
-
-def test_bypass_with_reason_allows_design_and_is_reported():
-    out = run(s1_input(stories=[], sway_bypass="มีผนังรับแรงเฉือนครบสองทิศ"), [S1])
-    assert out["gate_ok"] and out["bypass"] and out["results"]
-    row = [r for r in out["summary"] if r[0] == "ด่านตรวจ sway ก่อนออกแบบ"][0]
-    assert row[2] == "ผู้ใช้ยืนยัน" and "ผนัง" in row[1]
+def test_nonsway_assumed_and_reported():
+    """ระบบตรวจ sway ถูกถอดออก (incoming): ออกแบบได้ทันที และแจ้งสมมติฐาน non-sway ในสรุป/Calsheet"""
+    out = run(s1_input(), [S1])
+    assert out["results"] and "classes" not in out
+    row = out["summary"][0]
+    assert row[0] == "โครง sway / non-sway" and "incoming" in row[1] and row[2] == "ยังไม่ตรวจ"
     html = build_column_calsheet(ProjectInfo(member="C1"), out)
-    assert "ผนังรับแรงเฉือนครบสองทิศ" in html
-
-
-def test_bypass_refused_when_data_shows_sway():
-    stories = [dict(STORY[0], delta_o=40.0), STORY[1]]
-    out = run(s1_input(stories=stories, sway_bypass="ยืนยัน"), [S1])
-    assert not out["gate_ok"] and out["results"] == []
-
-
-def test_other_story_does_not_affect_column():
-    stories = STORY + [dict(STORY[0], story="2", delta_o=40.0)]
-    out = run(s1_input(stories=stories), [S1])
-    assert not out["sway"] and len(out["classes"]) == 3
+    assert "สมมติว่าเป็น<b>โครง non-sway</b>" in html
 
 
 def test_rcdc_column_with_rb9_ties_fails_tie_size():
     inp = ColumnInput(300, 300, 25, 420, 420, 50, 19.1, 2, 2, 9.0, 100, cover_to="long",
-                      lu_x=1100, lu_y=1100, L=1500, stories=STORY, story_name="1")
+                      lu_x=1100, lu_y=1100, L=1500)
     out = run(inp, [Combo("12", 57.08e3, -11.9e6, 0, 0, 0, Vuy=7.93e3)])
     tie = {r[0]: r[2] for r in out["summary"]}
     assert tie["ขนาดปลอก"] == "ไม่ผ่าน"
@@ -110,13 +82,10 @@ def test_column_page_uses_staad_names_and_designs():
     assert charts and any("Mnz" in c for c in charts)
 
 
-def test_beta90_swaps_story_direction_only():
+def test_column_page_has_no_sway_step():
     at = _column_page()
-    before = [m.label for m in at.metric if m.label.startswith("ทิศ")]
-    at.checkbox(key="c_beta90").check().run()
-    after = [m.label for m in at.metric if m.label.startswith("ทิศ")]
-    assert before == ["ทิศ X → ใช้กับ Mz", "ทิศ Z → ใช้กับ My"]
-    assert after == ["ทิศ Z → ใช้กับ Mz", "ทิศ X → ใช้กับ My"]
+    assert not [c for c in at.checkbox if c.key in ("c_beta90", "c_bypass")]
+    assert any("Incoming" in i.value for i in at.info)
 
 
 USER_STAAD = """Beam\tL/C\tNode\tAxial Force\tShear-Y\tShear-Z\tTorsion\tMoment-Y\tMoment-Z

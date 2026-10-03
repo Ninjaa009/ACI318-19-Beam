@@ -107,8 +107,6 @@ def run():
     check_true("C2", "ใช้สมการ (a) เพราะ Av ≥ Av,min", r.vc_eq == "a")
 
     # ---------------- C3 ความชะลูด เครื่องหมายจากแรงเฉือน ----------------
-    Q, nonsway = C.stability_index(C.kn(1083.58), 0.75, C.kn(49.11), 1500)
-    check("C3", "Q ชั้นใต้ดิน ทิศ X", Q, 0.01103, 1e-5)
     s = C.slenderness(S, "x", 2600, C.kn(59.37), C.knm(-8.13), C.knm(7.08), V=C.kn(5.07), L=3000)
     check("C3", "M1/M2 (โค้งสองทาง ตรวจจาก V·L)", s.ratio_M1M2, 7.08 / 8.13, 1e-9)
     check("C3", "เกณฑ์ min(34 + 12M1/M2, 40)", s.limit, 40.0, 1e-9)
@@ -182,7 +180,6 @@ def run():
     S8 = sol["S"]
     sx = C.slenderness(S8, "x", E.lu, E.Pu, E.Mx_t, E.Mx_b, V=E.Vx, L=E.Lmem, beta_dns=E.beta_dns)
     sy = C.slenderness(S8, "y", E.lu, E.Pu, E.My_t, E.My_b, V=E.Vy, L=E.Lmem, beta_dns=E.beta_dns)
-    check("C8", "Q", C.stability_index(E.sumPu, E.delta_o, E.Vus, E.lc)[0], R["Q"], 1e-12)
     check("C8", "M1/M2 แกน x (โค้งทางเดียวจาก V·L)", sx.ratio_M1M2, R["rx"], 1e-12)
     check("C8", "M1/M2 แกน y (โค้งสองทางจาก V·L)", sy.ratio_M1M2, R["ry"], 1e-12)
     check_true("C8", "แกน x ชะลูด / แกน y ไม่ชะลูด", sx.slender and not sy.slender,
@@ -207,70 +204,11 @@ def run():
     tie = {x[0]: x[1] for x in C.tie_checks(S8, E.s_tie, 2, 2)}
     check_true("C8", "รายละเอียดปลอกผ่านทุกข้อ", all(v for v in tie.values()))
 
-    # ---------------- C9 จำแนก sway / non-sway (ตาราง Q ของรายงาน RCDC) ----------------
-    rcdc = [("-1.5–0", "x", "13", 1083.58, 0.75, 49.11, 1.5), ("0–3", "x", "13", 630.46, 1.16, 36.92, 3),
-            ("3–6", "x", "13", 177.34, 0.52, 12.52, 3), ("-1.5–0", "y", "15", 1083.58, 0.63, 36.84, 1.5),
-            ("0–3", "y", "15", 630.46, 0.97, 27.69, 3), ("3–6", "y", "15", 177.34, 0.45, 9.39, 3)]
-    rows = [dict(story=st, direction=d, combo=cb, sumPu=P * 1e3, delta_o=do, Vus=V * 1e3,
-                 lc=lc * 1e3, reduced=True) for st, d, cb, P, do, V, lc in rcdc]
-    cls = {(c.story, c.direction): c for c in C.classify_stories(rows)}
-    for (st, d), exp in ((("-1.5–0", "x"), 0.011), (("0–3", "x"), 0.007), (("3–6", "x"), 0.002),
-                         (("-1.5–0", "y"), 0.012), (("0–3", "y"), 0.007), (("3–6", "y"), 0.003)):
-        check("C9", f"Q ชั้น {st} ทิศ {d} เทียบ RCDC", cls[(st, d)].Q_max, exp, 0.0006)
-    check_true("C9", "ทุกชั้นเป็น non-sway", all(c.status == "non-sway" for c in cls.values()))
-    # ใช้ Q สูงสุดจากหลาย combo
-    multi = rows[:1] + [dict(rows[0], combo="W2", delta_o=1.6)] + [dict(rows[0], combo="G", Vus=0)]
-    c2 = C.classify_stories(multi)[0]
-    check("C9", "Q สูงสุดจากหลาย combo (ข้าม combo ที่ Vus = 0)", c2.Q_max,
-          1083.58 * 1.6 / (49.11 * 1500), 1e-12)
-    check_true("C9", "combo วิกฤตคือ W2", c2.combo == "W2")
-    # ยังไม่ลด stiffness
-    nr = [dict(rows[0], reduced=False)]
-    check_true("C9", "ไม่ลด stiffness แต่ Q/0.35 ≤ 0.05 → non-sway",
-               C.classify_stories(nr)[0].status == "non-sway")
-    nr2 = [dict(rows[0], reduced=False, delta_o=2.5)]
-    c3 = C.classify_stories(nr2)[0]
-    check_true("C9", "ไม่ลด stiffness และ Q ≤ 0.05 < Q/0.35 → ต้องยืนยัน", c3.status == "ต้องยืนยัน",
-               f"Q = {c3.Q_max:.4f}, Q/0.35 = {c3.Q_upper:.4f}")
-    sw = C.classify_stories([dict(rows[0], delta_o=4.0)])[0]
-    check_true("C9", "Q > 0.05 → sway", sw.status == "sway", f"Q = {sw.Q_max:.4f}")
-    check_true("C9", "Mx ใช้ผลการเซทิศ y", C.sway_dir_for_axis("x") == "y")
-
-    # ---------------- C10 ด่านบังคับ non-sway ก่อนออกแบบ ----------------
-    allc = C.classify_stories(rows)
-    ok, _ = C.nonsway_gate(allc, "0–3")
-    check_true("C10", "ชั้นที่ non-sway ทั้งสองทิศ → ผ่านด่าน", ok)
-    ok, msg = C.nonsway_gate(C.classify_stories([r for r in rows if r["direction"] == "x"]), "0–3")
-    check_true("C10", "ขาดข้อมูลทิศ y → ไม่ผ่านด่าน", (not ok) and "ทิศ y" in msg[0], msg[0][:40])
-    ok, msg = C.nonsway_gate(C.classify_stories(rows), "ไม่มีชั้นนี้")
-    check_true("C10", "ไม่มีข้อมูลชั้น → ไม่ผ่านด่าน", (not ok) and len(msg) == 2)
-    sw_rows = [dict(r, delta_o=4.0) if (r["story"], r["direction"]) == ("-1.5–0", "x") else r
-               for r in rows]
-    ok, msg = C.nonsway_gate(C.classify_stories(sw_rows), "-1.5–0")
-    check_true("C10", "sway → ไม่ผ่านด่าน (ปิดปรับปรุง)", (not ok) and "ปิดปรับปรุง" in msg[0])
-    cf_rows = [dict(r, delta_o=2.5, reduced=False) if (r["story"], r["direction"]) == ("-1.5–0", "y")
-               else r for r in rows]
-    ok, msg = C.nonsway_gate(C.classify_stories(cf_rows), "-1.5–0")
-    check_true("C10", "ต้องยืนยัน → ไม่ผ่านด่าน", (not ok) and "ต้องยืนยัน" in msg[0])
-    ok, msg = C.nonsway_gate(C.classify_stories(cf_rows), "-1.5–0", "มีผนังรับแรงเฉือนสองทิศ")
-    check_true("C10", "bypass + เหตุผล (กรณีต้องยืนยัน) → ผ่าน และบันทึกเหตุผล",
-               ok and msg[0].startswith(C.BYPASS_LABEL) and "ผนัง" in msg[0])
-    ok, msg = C.nonsway_gate([], "1", "โครงค้ำยัน")
-    check_true("C10", "bypass เมื่อไม่มีข้อมูลชั้น → ผ่าน", ok)
-    ok, msg = C.nonsway_gate(C.classify_stories(sw_rows), "-1.5–0", "ผู้ใช้ยืนยัน")
-    check_true("C10", "bypass เมื่อข้อมูลแสดง sway → ไม่ยอม", (not ok) and "ไม่ได้" in msg[0])
-    ok, _ = C.nonsway_gate([], "1", "   ")
-    check_true("C10", "เหตุผลว่าง → ไม่ถือว่า bypass", not ok)
-
     # ---------------- C11 sign convention / นำเข้าจาก STAAD ----------------
     f = C.from_staad(fx_s=1600, fy_s=-6, fz_s=10, my_s=-20, mz_s=60, my_e=-30, mz_e=-90)
     check_true("C11", "STAAD: Mz→Mx, Fy→Vuy, My→My, Fz→Vux, P = Fx(start)",
                (f["Pu"], f["Mxt"], f["Mxb"], f["Vuy"], f["Myt"], f["Myb"], f["Vux"])
                == (1600, 90, 60, 6, 30, 20, 10))
-    check_true("C11", "ทิศการเซ (beta 0): X → Mz (ภายใน y), Z → My (ภายใน x)",
-               (C.staad_sway_dir("X"), C.staad_sway_dir("z")) == ("y", "x"))
-    check_true("C11", "beta 90°: สลับการจับคู่ทิศการเซ (แรงไม่สลับ)",
-               (C.staad_sway_dir("X", True), C.staad_sway_dir("Z", True)) == ("x", "y"))
     check_true("C11", "ชื่อแกน STAAD: x ภายใน = z, y = y", C.STAAD_AXIS == {"x": "z", "y": "y"})
     check_true("C11", "flip_axial กลับเครื่องหมาย P", C.from_staad(1600, 0, 0, 0, 0, 0, 0,
                                                                      flip_axial=True)["Pu"] == -1600)

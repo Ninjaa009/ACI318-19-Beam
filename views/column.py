@@ -124,96 +124,10 @@ def val(x, d=0.0):
         return d
 
 
-def show_classes(classes):
-    rows = []
-    for c in classes:
-        for cb, P, V, do, lc_, Q in c.rows:
-            rows.append({"ชั้น": c.story, "ทิศ": DIRL.get(c.direction, c.direction), "Combo": cb, f"ΣPu ({fu})": fF(P),
-                         f"Vus ({fu})": fF(V), "Δo (mm)": do, "lc (m)": lc_ / 1000, "Q": Q,
-                         "ผล (Q max ของชั้น/ทิศ)": c.status if cb == c.combo else ""})
-        if not c.rows:
-            rows.append({"ชั้น": c.story, "ทิศ": DIRL.get(c.direction, c.direction),
-                         "ผล (Q max ของชั้น/ทิศ)": c.status})
-    if rows:
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
-                     column_config={"Q": st.column_config.NumberColumn(format="%.4f")})
-    for c in classes:
-        for n in c.notes:
-            (st.warning if c.status == "ต้องยืนยัน" else st.info)(
-                f"ชั้น {c.story} ทิศ {DIRL.get(c.direction, c.direction)}: {n}")
-
-
-# ---------------------------------------------------------------- ขั้นที่ 1: ด่านตรวจ sway
-st.header("ขั้นที่ 1 · ตรวจ sway / non-sway (บังคับก่อนออกแบบ)")
-st.caption(f"ACI 6.6.4.3: Q = ΣPu·Δo/(Vus·lc) ≤ 0.05 → non-sway · ป้อนทุกชั้น ทุกทิศ ทุก combo ที่มีแรงด้านข้าง · "
-           f"ΣPu รวมทุกเสา/ผนังในชั้น · Vus = แรงเฉือนของชั้น (ไม่ใช่ base shear) · Δo = ค่าบน − ค่าล่าง "
-           f"จากการวิเคราะห์ลำดับหนึ่งของโมเดลที่ลด stiffness · lc = ความสูงชั้น c/c · แรงหน่วย {fu}")
-beta90 = st.checkbox("เสาตั้ง beta angle = 90° (การเซทิศ X ทำให้เกิด My แทน Mz)", key="c_beta90",
-                     help="beta = 0: local z ขนานโลก Z → เซทิศ X → Mz, เซทิศ Z → My ⚠️ ยืนยันกับโมเดล")
-DIRL = {C.staad_sway_dir("X", beta90): "X", C.staad_sway_dir("Z", beta90): "Z"}   # ภายใน → โลก
-story_default = pd.DataFrame([
-    {"ชั้น": "1", "ทิศ": "X", "Combo": "W+X", "ΣPu": 24000.0, "Vus": 900.0, "Δo (mm)": 3.2,
-     "lc (m)": 5.0, "ลด stiffness แล้ว": True},
-    {"ชั้น": "1", "ทิศ": "Z", "Combo": "W+Z", "ΣPu": 24000.0, "Vus": 900.0, "Δo (mm)": 3.2,
-     "lc (m)": 5.0, "ลด stiffness แล้ว": True},
-])
-sdf = st.data_editor(
-    story_default, num_rows="dynamic", width="stretch", key="c_stories",
-    column_config={
-        "ทิศ": st.column_config.SelectboxColumn("ทิศ (โลก)", options=["X", "Z"], required=True,
-                                               help="ทิศการเซตามแกนโลก STAAD (Y = แนวดิ่ง)"),
-        "ΣPu": num(f"ΣPu ({fu})"), "Vus": num(f"Vus ({fu})"),
-        "ลด stiffness แล้ว": st.column_config.CheckboxColumn(
-            help="Δo จากโมเดลที่ใช้ 0.35Ig คาน / 0.70Ig เสา (ACI 6.6.3.1.1)"),
-    })
-stories = []
-for _, r in sdf.iterrows():
-    if pd.isna(r.get("ชั้น")) or pd.isna(r.get("ΣPu")):
-        continue
-    stories.append(dict(story=str(r["ชั้น"]), direction=C.staad_sway_dir(r.get("ทิศ") or "X", beta90),
-                        combo=str(r.get("Combo") or ""), sumPu=val(r["ΣPu"]) * F,
-                        Vus=val(r["Vus"]) * F, delta_o=val(r["Δo (mm)"]),
-                        lc=u.m_to_mm(val(r["lc (m)"])), reduced=bool(r.get("ลด stiffness แล้ว"))))
-story_names = list(dict.fromkeys(st_["story"] for st_ in stories))
-story_name = st.selectbox("เสาต้นนี้อยู่ชั้น", story_names or ["(ไม่มีข้อมูลชั้น)"], key="c_mystory")
-
-bypass = st.checkbox("ข้ามการตรวจ sway — วิศวกรยืนยันเองว่าเป็น non-sway", value=False, key="c_bypass",
-                     help="ใช้เมื่อไม่มีข้อมูล Q หรือผลยัง 'ต้องยืนยัน' เช่น โครงมีผนังรับแรงเฉือน/โครงค้ำยัน "
-                          "ครบทั้งสองทิศ — ข้ามไม่ได้ถ้าข้อมูลที่ป้อนแสดงว่า sway")
-bypass_reason = ""
-if bypass:
-    bypass_reason = st.text_input("เหตุผล (จำเป็น — พิมพ์ลงใน Calsheet)", key="c_bypass_why",
-                                  placeholder="เช่น มีผนังรับแรงเฉือนครบทั้งสองทิศ ตรวจ Q จากโมเดลแยกแล้ว")
-    if not bypass_reason.strip():
-        st.warning("ต้องใส่เหตุผลก่อนจึงจะข้ามการตรวจ sway ได้")
-
-classes = C.classify_stories(stories)
-gate_ok, gate_msgs = C.nonsway_gate(classes, story_name, bypass_reason, DIRL)
-bypassed = gate_ok and bool(gate_msgs)
-mine = {c.direction: c for c in classes if c.story == str(story_name)}
-g1, g2 = st.columns(2)
-for col, d, ax in ((g1, "y", "Mz"), (g2, "x", "My")):
-    c = mine.get(d)
-    col.metric(f"ทิศ {DIRL[d]} → ใช้กับ {ax}", "ไม่มีข้อมูล" if c is None or math.isnan(c.Q_max)
-               else f"Q = {c.Q_max:.4f}", c.status if c else "ต้องป้อนข้อมูล", delta_color="off")
-with st.expander("ตาราง Q ทุกชั้น", expanded=not gate_ok):
-    show_classes(classes)
-if bypassed:
-    st.warning(f"⚠️ {gate_msgs[0]} — ออกแบบต่อได้ ผลการออกแบบถูกต้องเฉพาะเมื่อโครงเป็น non-sway จริง "
-               "(สถานะ \"ผู้ใช้ยืนยัน\" จะแสดงในตารางสรุปและ Calsheet)")
-elif gate_ok:
-    st.success(f"ผ่านด่าน: ชั้น {story_name} เป็น **non-sway ทั้งสองทิศ** → ออกแบบเสาในขั้นที่ 2 ได้")
-else:
-    for m in gate_msgs:
-        st.error(m)
-    if any(c.status == "sway" for c in mine.values()):
-        st.warning("🚧 **การออกแบบเสาในโครง sway ปิดปรับปรุง** — ใช้ได้เฉพาะเสา non-sway "
-                   "(ทางเลือก: เพิ่มความแข็งของโครง เช่น ผนังรับแรงเฉือน แล้วตรวจ Q ใหม่)")
-
-# ---------------------------------------------------------------- ขั้นที่ 2: ออกแบบ non-sway
-st.header("ขั้นที่ 2 · ออกแบบเสา non-sway")
-with st.expander("🚧 ออกแบบเสา sway (δs, k > 1, P-Δ) — ปิดปรับปรุง"):
-    st.write("ส่วนนี้ยังไม่เปิดใช้ เสาที่อยู่ในชั้นที่เป็น sway จะไม่ผ่านด่านในขั้นที่ 1")
+# ---------------------------------------------------------------- ออกแบบ non-sway
+st.info("ออกแบบเป็น **เสาในโครง non-sway** — ผู้ออกแบบต้องยืนยันเองว่าโครงไม่เซ (Q ≤ 0.05 ตาม ACI 6.6.4.3 "
+        "หรือมีผนังรับแรงเฉือน/โครงค้ำยัน) · 🚧 **Incoming:** ระบบตรวจ sway / non-sway และการออกแบบเสา sway")
+st.header("ข้อมูลแรง")
 mode = st.radio("รูปแบบข้อมูลแรง", ["staad", "app"], horizontal=True, key="c_mode",
                 format_func=lambda x: {"staad": "STAAD.Pro member end forces (แนะนำ)",
                                        "app": "ป้อน Mz / My เอง"}[x])
@@ -350,13 +264,13 @@ else:
 sign_ok, sign_msgs = C.check_axial_sign([(n, f["Pu"], g) for n, f, g, *_ in rows_in])
 for m in sign_msgs:
     (st.warning if sign_ok else st.error)(m)
-ready = gate_ok and sign_ok and units_ok
+ready = sign_ok and units_ok
 
 if st.button("ตรวจสอบเสา", type="primary", disabled=not ready,
-             help=None if ready else "ต้องผ่านด่าน sway, ตรวจเครื่องหมาย P และเลือกหน่วยก่อน"):
+             help=None if ready else "ต้องตรวจเครื่องหมาย P และเลือกหน่วยก่อน"):
     st.session_state.col_go = True
 if not ready:
-    st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อผ่านด่านตรวจ sway (ขั้นที่ 1), เครื่องหมาย P ถูกต้อง และเลือกหน่วยแล้ว")
+    st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อเครื่องหมาย P ถูกต้องและเลือกหน่วยแล้ว")
     st.stop()
 if not st.session_state.get("col_go"):
     st.info("กรอกข้อมูลแล้วกด **ตรวจสอบเสา** — ค่าเริ่มต้นคือตัวอย่างเสาชะลูด S1 ในเอกสารของสกิล")
@@ -372,15 +286,12 @@ if not combos:
 try:
     inp = ColumnInput(b, h, fc, fy, fyt, cover, float(db), int(nx), int(ny), float(ds), s,
                       int(legs_x), int(legs_y), cover_to, dagg, grade420, lu_x, lu_y, k_x, k_y, L,
-                      beta, r_method, EI_method, stories=stories, story_name=story_name,
-                      sway_bypass=bypass_reason, dir_labels=DIRL, omf=omf, cover_min=cover_min)
+                      beta, r_method, EI_method, omf=omf, cover_min=cover_min)
     out = run(inp, combos)
 except ValueError as e:
     st.error(f"ข้อมูลไม่ถูกต้อง: {e}")
     st.stop()
 sec = out["sec"]
-if not out["gate_ok"]:                       # กันไว้อีกชั้น (ด่านเดียวกับขั้นที่ 1)
-    st.stop()
 
 g = out["gov"]
 gs = out["gov_shear"]
@@ -399,21 +310,13 @@ nsl = sum(1 for r in out["results"] if not r.error and (r.sx.slender or r.sy.sle
 m4.metric("ชะลูด", f"{nsl}/{len(out['results'])} combo")
 
 checked = [row for row in out["summary"] if row[2] in (PASS, FAIL)]
-confirm = [row for row in out["summary"] if row[2] == "ต้องยืนยัน"]
-if confirm and all(row[2] == PASS for row in checked) and not bad:
-    st.warning("กำลังผ่าน แต่การจำแนก non-sway **ต้องยืนยัน** (โมเดลยังไม่ลด stiffness) — ดูแท็บ sway / non-sway")
-elif all(row[2] == PASS for row in checked) and not bad:
+if all(row[2] == PASS for row in checked) and not bad:
     st.success("รายการที่ตรวจแล้วผ่านทั้งหมด — รายการ \"ยังไม่ตรวจ\" / \"ไม่มีข้อมูล\" ต้องตรวจเพิ่มเอง")
 else:
     st.error("มีรายการไม่ผ่าน — ดูตารางสรุป")
 
-t3d, t2d, tres, tq, tsl, tsh, tsum = st.tabs(["3D interaction", "กราฟตัดที่ Pu", "ผลทุก combo",
-                                              "sway / non-sway", "ความชะลูด", "แรงเฉือน", "สรุป"])
-
-with tq:
-    show_classes(out["classes"])
-    st.caption(f"Mz ใช้ผลการเซทิศ {DIRL['y']} · My ใช้ผลการเซทิศ {DIRL['x']} · combo ที่มีแต่แรงแนวดิ่ง"
-               "ใช้ผลจำแนกของชั้น/ทิศ")
+t3d, t2d, tres, tsl, tsh, tsum = st.tabs(["3D interaction", "กราฟตัดที่ Pu", "ผลทุก combo",
+                                         "ความชะลูด", "แรงเฉือน", "สรุป"])
 
 with t3d:
     surf = C.surface(sec, n_theta=48, n_c=28)
