@@ -11,6 +11,8 @@ from rcbeam import units as u
 from rcbeam.calsheet import ProjectInfo
 from rcbeam.col_calsheet import build_column_calsheet, column_svg
 from rcbeam.nav import page_link
+from rcbeam.staad_example import load_example
+from rcbeam.staad_view import column_level, model_figure, plan_figure
 from rcbeam.colcheck import C, ColumnInput, Combo, PASS, FAIL, run
 import staad_io as S_IO  # noqa: E402  (skill scripts อยู่ใน sys.path จาก rcbeam.colcheck)
 
@@ -33,9 +35,43 @@ for _k, _v in (("c_h", 0.40), ("c_b", 0.40), ("c_L", 5.0), ("c_lux", 4.5), ("c_l
     st.session_state.setdefault(_k, _v)
 if src == "model":
     mcols = [m for m in SM.columns() if any((m, lc) in SF.data for lc in SF.loads())]
-    sel = st.selectbox("เสา (member ในโมเดล)", mcols, key="c_member",
+    lev_of = {m: column_level(SM, m) for m in mcols}
+    levels = sorted(set(lev_of.values()))
+    # คลิกเสาในผัง (รอบก่อน) → เลือกเสา — ต้องตั้งค่าก่อนสร้าง selectbox
+    try:
+        pts = st.session_state["c_plan"]["selection"]["points"]
+    except (KeyError, TypeError):
+        pts = []
+    cd = pts[0].get("customdata") if pts else None
+    clicked = (cd[0] if isinstance(cd, (list, tuple)) else cd) if cd is not None else None
+    if clicked in mcols and st.session_state.get("c_click_prev") != clicked:
+        st.session_state.c_member = clicked
+    st.session_state.c_click_prev = clicked
+    if st.session_state.get("c_member") not in mcols:
+        st.session_state.c_member = mcols[0]
+    # ชั้น: เปลี่ยนชั้นเอง → เลือกเสาต้นแรกของชั้น, เลือกเสา → ชั้นตามเสา
+    if len(levels) > 1:
+        if st.session_state.get("c_level") in levels and st.session_state.get("c_level") != st.session_state.get(
+                "c_level_prev") and st.session_state.get("c_level_prev") is not None:
+            st.session_state.c_member = next(m for m in mcols if lev_of[m] == st.session_state.c_level)
+        st.session_state.c_level = lev_of[st.session_state.c_member]
+        st.session_state.c_level_prev = st.session_state.c_level
+    c1, c2 = st.columns([1, 2])
+    if len(levels) > 1:
+        lev = c1.selectbox("ชั้น (ระดับตีนเสา)", levels, key="c_level", format_func=lambda y: f"Y = {y / 1000:.2f} m")
+    else:
+        lev = levels[0]
+    sel = c2.selectbox("เสา (member ในโมเดล) — หรือคลิกเสาในผังข้างล่าง", mcols, key="c_member",
                        format_func=lambda m: f"member {m} · {SM.prism.get(m, (0, 0))[0]:.0f}×"
                                              f"{SM.prism.get(m, (0, 0))[1]:.0f} · L {SM.length(m) / 1000:.2f} m")
+    g1, g2 = st.columns(2)
+    with g1:
+        st.plotly_chart(plan_figure(SM, sel, height=380, level=lev), key="c_plan", on_select="rerun",
+                        selection_mode="points", width="stretch")
+        st.caption("ผังมองจากด้านบน — **คลิกที่เสาเพื่อเลือก** · สีส้ม = เสาที่เลือก")
+    with g2:
+        st.plotly_chart(model_figure(SM, None, sel, member_ids=False, height=380), width="stretch")
+        st.caption("โมเดล 3D — แกน local ของเสาที่เลือก (x ดำ, y เขียว = ทิศ YD, z ม่วง = ทิศ ZD)")
     if st.session_state.get("c_member_prev") != (sel, id(SM)):
         if sel in SM.prism:
             st.session_state.c_h = SM.prism[sel][0] / 1000
@@ -46,7 +82,13 @@ if src == "model":
     st.caption("YD, ZD และความยาวเติมจากโมเดลแล้ว (แก้ได้ในแถบข้าง) · l_u เริ่มต้น = ความยาว c/c "
                "(อนุรักษ์นิยม — ลดได้ตามระยะช่องว่างจริงระหว่างคาน)")
 elif SM is None or SF is None:
-    page_link("views/staad_model.py", label="หรือนำเข้าโมเดล STAAD (.std + .anl) ก่อน", icon="🧊")
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        page_link("views/staad_model.py", label="นำเข้าโมเดล STAAD (.std + ตารางแรง) ในขั้นที่ 1–2 "
+                                                "เพื่อเลือกเสาจากโมเดล 3D", icon="🧊")
+    if c2.button("ใช้โมเดลตัวอย่าง", key="c_example"):
+        load_example(st.session_state)
+        st.rerun()
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:

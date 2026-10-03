@@ -1,16 +1,13 @@
 """ขั้นที่ 1–2: นำเข้าโมเดล STAAD.Pro (.std) และผลวิเคราะห์ (.anl) — เปิดผ่าน app.py"""
-from pathlib import Path
-
 import pandas as pd
 import streamlit as st
 
 from rcbeam.nav import page_link
 from rcbeam.colcheck import C
+from rcbeam.staad_example import load_example
 from rcbeam.staad_view import model_figure, plan_figure
 import staad_io as S   # noqa: E402  (อยู่ใน skills/rc-column-aci318m19/scripts ซึ่ง colcheck เพิ่มเข้า sys.path แล้ว)
 
-EXAMPLE_DIR = Path(__file__).resolve().parent.parent / "skills" / "rc-column-aci318m19" / "references" / "staad_example"
-EXAMPLE = EXAMPLE_DIR / "frame_3x2.std"
 
 st.title("โมเดล STAAD.Pro")
 st.caption("ขั้นที่ 1 Geometry (.std) → ขั้นที่ 2 ผลวิเคราะห์ (.anl) → ขั้นที่ 3 ออกแบบ (หน้าเสา) · "
@@ -33,11 +30,7 @@ c1, c2 = st.columns([3, 1])
 up = c1.file_uploader("ไฟล์ input ของ STAAD (.std) — หรือใช้ไฟล์ .anl ก็ได้ (อ่านจากสำเนา input ต้นไฟล์)",
                       type=["std", "anl", "txt"], key="sm_std")
 if c2.button("ใช้โมเดลตัวอย่าง", help="โครง 1 ชั้น 3×2 ช่วง (references/staad_example/frame_3x2.std ของ skill)"):
-    st.session_state.std_text = EXAMPLE.read_text()
-    st.session_state.std_name = EXAMPLE.name
-    st.session_state.pop("anl_text", None)
-    st.session_state.sm_src2 = "table"
-    st.session_state.sm_table = (EXAMPLE_DIR / "frame_3x2_beam_end_force.txt").read_text()
+    load_example(st.session_state)
 if up is not None and st.session_state.get("std_name") != up.name + str(up.size):
     raw = _read(up)
     echo = S.extract_input_echo(raw) if up.name.lower().endswith((".anl", ".txt")) else None

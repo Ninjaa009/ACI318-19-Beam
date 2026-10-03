@@ -148,39 +148,56 @@ def _draw_load(fig, model, lid, J):
                                               hoverinfo="text"))
 
 
-def plan_figure(model, highlight=None, height=460):
-    """ผังมองจากด้านบน (ลงทิศ −Y): X ไปขวา, Z ลงล่าง — หน้าตัดเสาตามขนาดจริงและทิศ YD / ZD"""
+def column_level(model, m):
+    """ระดับตีนเสา (mm) — ใช้แยกชั้นในผัง"""
+    return round(model.joints[model.bottom_top(m)[0]][1], 1)
+
+
+def plan_figure(model, highlight=None, height=460, level=None):
+    """ผังมองจากด้านบน (ลงทิศ −Y): X ไปขวา, Z ลงล่าง — หน้าตัดเสาตามขนาดจริงและทิศ YD / ZD
+
+    level: ระดับตีนเสา (mm) ของชั้นที่จะแสดง (None = ชั้นล่างสุด) — คานที่แสดงคือคานที่ระดับหัวเสาชั้นนั้น
+    เสาแต่ละต้นมีจุดคลิกได้ (customdata = เลข member) สำหรับเลือกเสาด้วย st.plotly_chart(on_select=...)
+    """
     fig = go.Figure()
-    cols = set(model.columns())
+    cols = model.columns()
+    if not cols:
+        return fig
+    if level is None:
+        level = min(column_level(model, m) for m in cols)
+    here = [m for m in cols if abs(column_level(model, m) - level) < 1.0]
+    tops = {round(model.joints[model.bottom_top(m)[1]][1], 1) for m in here}
     for m, (a, b) in model.members.items():
-        if m in cols:
+        if m in set(cols):
             continue
-        pa, pb = _m(model.joints[a]), _m(model.joints[b])
-        if abs(pa[1] - pb[1]) > 1e-6:
-            continue                                   # ชิ้นส่วนเอียง: ข้ามในผัง
+        pa, pb = model.joints[a], model.joints[b]
+        if abs(pa[1] - pb[1]) > 1e-6 or not any(abs(pa[1] - t) < 1.0 for t in tops):
+            continue                                   # ชิ้นส่วนเอียง หรือคานคนละชั้น
+        pa, pb = _m(pa), _m(pb)
+        # hoverinfo="skip": เส้นคานผ่านศูนย์กลางเสา ถ้าคลิกได้จะแย่งการคลิกเลือกเสา
         fig.add_trace(go.Scatter(x=[pa[0], pb[0]], y=[pa[2], pb[2]], mode="lines", line=dict(color=BEAM, width=2),
-                                 hoverinfo="text", hovertext=f"member {m}", showlegend=False))
+                                 hoverinfo="skip", showlegend=False))
         fig.add_annotation(x=(pa[0] + pb[0]) / 2, y=(pa[2] + pb[2]) / 2, text=str(m), showarrow=False,
                            font=dict(color=BEAM, size=11), bgcolor="white")
-    seen = {}
-    for m in sorted(cols):
+    xs, zs, ids, tips = [], [], [], []
+    for m in sorted(here):
         lo, _ = model.bottom_top(m)
         x, _, z = _m(model.joints[lo])
-        if (round(x, 4), round(z, 4)) in seen:
-            continue                                   # เสาหลายชั้นซ้อนกัน: แสดงต้นล่างสุด
-        seen[(round(x, 4), round(z, 4))] = m
         YD, ZD = (v / 1000 for v in model.prism.get(m, (300, 300)))
         _, yv, _ = local_axes(model, m)
         along_x = abs(yv[0]) >= abs(yv[2])            # YD ขนานแกนโลก X หรือ Z
         hx, hz = (YD / 2, ZD / 2) if along_x else (ZD / 2, YD / 2)
         hl = m == highlight
         fig.add_shape(type="rect", x0=x - hx, x1=x + hx, y0=z - hz, y1=z + hz,
-                      fillcolor=HL if hl else "#f5b7b1", line=dict(color=COL, width=2 if hl else 1))
+                      fillcolor=HL if hl else "#f5b7b1", line=dict(color=COL, width=3 if hl else 1))
         fig.add_annotation(x=x + hx, y=z - hz, text=f"<b>{m}</b>", showarrow=False, xanchor="left",
-                           yanchor="bottom", font=dict(color=COL, size=12))
-        fig.add_trace(go.Scatter(x=[x], y=[z], mode="markers", marker=dict(size=1, color=COL), showlegend=False,
-                                 hoverinfo="text", hovertext=(f"เสา {m}: YD {YD * 1000:.0f} mm ขนาน "
-                                                              f"{'X' if along_x else 'Z'}, ZD {ZD * 1000:.0f} mm")))
+                           yanchor="bottom", font=dict(color=COL, size=13))
+        xs.append(x); zs.append(z); ids.append(m)
+        tips.append(f"เสา {m} (คลิกเพื่อเลือก)<br>YD {YD * 1000:.0f} mm ขนาน {'X' if along_x else 'Z'}, "
+                    f"ZD {ZD * 1000:.0f} mm")
+    fig.add_trace(go.Scatter(x=xs, y=zs, mode="markers", customdata=ids, hovertext=tips, hoverinfo="text",
+                             marker=dict(size=22, color=COL, opacity=0.15, symbol="square"), showlegend=False,
+                             name="เสา"))
     fig.update_layout(height=height, margin=dict(l=10, r=10, t=10, b=10), plot_bgcolor="white",
                       xaxis=dict(title="X (m)", scaleanchor="y", showgrid=False, zeroline=False),
                       yaxis=dict(title="Z (m) (ลงล่าง)", autorange="reversed", showgrid=False, zeroline=False))

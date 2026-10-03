@@ -92,3 +92,17 @@ def test_model_page_example_uses_real_table():
     assert any("ตรวจสมดุลเสาทุกต้นทุก load ผ่าน" in m for m in msgs)
     assert any("แรงอัดที่ฐานเสาทุกต้นรวมกันเท่ากับน้ำหนักรวม" in m for m in msgs)
     assert at.session_state["staad_forces"].members() == list(range(1, 14))
+
+
+def test_column_page_example_button_and_plan_click():
+    at = AppTest.from_file("../views/column.py", default_timeout=60).run()
+    next(b for b in at.button if b.label == "ใช้โมเดลตัวอย่าง").click().run()
+    assert not at.exception
+    assert at.selectbox(key="c_member").value == 1
+    assert len(at.get("plotly_chart")) >= 2                          # ผัง + 3D
+    at.session_state["c_plan"] = {"selection": {"points": [{"customdata": 6}]}}   # จำลองการคลิกเสา 6
+    at.run()
+    assert at.selectbox(key="c_member").value == 6
+    at.selectbox(key="c_member").set_value(12).run()                 # เลือกจาก selectbox ยังทำงาน
+    assert at.selectbox(key="c_member").value == 12
+    assert at.number_input(key="c_h").value == pytest.approx(0.5)
