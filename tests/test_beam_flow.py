@@ -20,7 +20,7 @@ def test_beam_from_model_prefills_and_sends_design_values():
     assert at.multiselect(key="b_use_13").value == [101, 102]
     assert at.number_input(key="b_dmu").value < 0                        # ค่าเริ่มต้น = ปลายซ้าย (M−)
     at.radio(key="b_sec").set_value("mid").run()
-    assert at.number_input(key="b_dmu").value == pytest.approx(21.07e6 / 9806.65, rel=2e-3)   # M+ 21.07 kN·m
+    assert at.number_input(key="b_dmu").value == pytest.approx(20.86e6 / 9806.65, rel=2e-3)   # M+ 20.86 kN·m (floor load 45° จาก .std)
     next(b for b in at.button if b.label == "ออกแบบ").click().run()
     assert not at.exception
 

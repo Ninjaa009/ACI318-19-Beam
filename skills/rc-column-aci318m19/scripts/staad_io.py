@@ -1,15 +1,15 @@
-"""อ่านไฟล์ STAAD.Pro: input (.std) และผลวิเคราะห์ (.anl)
+"""อ่านไฟล์ STAAD.Pro: input (.std) + ตาราง Beam End Force ที่คัดลอกจากหน้าจอ STAAD
 
 หน่วยภายใน: mm, N, N·mm (เหมือน column.py)
 
 parse_std(text)  -> Model   : geometry, หน้าตัด PRIS, beta, ฐานรองรับ, load case, load combination
-parse_anl(text)  -> Forces  : ตาราง MEMBER END FORCES ทุกชุด (แกน local) พร้อมหน่วยจากหัวตาราง
+forces_from_table(text, ...) -> Forces : ตาราง Beam End Force ทุก member (แกน local) หน่วยจากหัวตาราง
 column_forces(model, forces, member, load) -> dict ของ from_staad + ทิศการดัด (บน/ล่างจาก geometry)
 
 ข้อจำกัด
 - รองรับคำสั่งหลักที่ใช้กับโครงข้อแข็ง คสล.: JOINT COORDINATES, MEMBER INCIDENCES, MEMBER PROPERTY (PRIS),
   CONSTANTS (BETA), SUPPORTS, LOAD / LOAD COMB, UNIT — คำสั่งอื่นถูกข้ามและเก็บไว้ใน Model.skipped
-- รูปแบบ .anl ต่างกันได้ตามเวอร์ชัน STAAD ⚠️ ต้องทดสอบกับไฟล์จริงของผู้ใช้ก่อนใช้งานจริง
+- FLOOR LOAD กระจายลงคานแบบเส้น 45° เฉพาะแผ่นสี่เหลี่ยมที่มีคานล้อมครบ (ยืนยันกับ STAAD แล้วสำหรับแผ่นจัตุรัส)
 """
 from dataclasses import dataclass, field
 import math
@@ -139,7 +139,7 @@ class Model:
 
     def vertical_total(self, lid):
         """ประมาณแรงแนวดิ่งรวม (N, ลง = ลบ) ของ primary load จากข้อมูลที่อ่านได้ — ใช้เทียบกับ
-        'SUMMATION FORCE-Y' ใน .anl เพื่อยืนยันว่า geometry / หน้าตัด / หน่วยถูกต้อง
+        แรงอัดที่ฐานเสารวมจากตาราง Beam End Force เพื่อยืนยันว่า geometry / หน้าตัด / หน่วย / แรงครบ
         FLOOR LOAD คิดพื้นที่เป็นกรอบสี่เหลี่ยมของ XRANGE/ZRANGE ตัดกับขอบโมเดล (แม่นเมื่อพื้นเต็มกรอบ)
         คืน (ค่า, หมายเหตุ) — None ถ้ามีน้ำหนักชนิดที่ประมาณไม่ได้
         """
@@ -379,41 +379,7 @@ def parse_std(text):
     return M
 
 
-# ---------------------------------------------------------------- .anl
-def extract_input_echo(text):
-    """ดึงสำเนาไฟล์ input ที่ STAAD พิมพ์ไว้ต้นไฟล์ .anl (บรรทัด "    12. MEMBER INCIDENCES")
-    คืนข้อความ .std หรือ None ถ้าไม่พบ — ใช้ .anl ไฟล์เดียวแทน .std ได้
-    """
-    out = []
-    for raw in str(text).splitlines():
-        m = re.match(r"^\s{0,10}(\d+)\.\s(.*)$", raw)
-        if not m:
-            continue
-        out.append(m.group(2).rstrip())
-        if m.group(2).strip().upper() == "FINISH":
-            break
-    return "\n".join(out) if out and out[0].strip().upper().startswith("STAAD") else None
-
-
-def applied_totals(text):
-    """'TOTAL APPLIED LOAD (...) SUMMARY (LOADING n)' ใน .anl → {n: (ΣFx, ΣFy, ΣFz) หน่วย N}"""
-    out, cur, uf = {}, None, None
-    for raw in str(text).splitlines():
-        U = raw.upper()
-        m = re.search(r"TOTAL APPLIED LOAD\s*\(\s*(\S+)\s+(\S+)\s*\)\s*SUMMARY\s*\(LOADING\s+(\d+)", U)
-        if m:
-            k = _unit_key(m.group(1), FORCE)
-            cur, uf = int(m.group(3)), FORCE[k] if k else None
-            out[cur] = [None, None, None]
-            continue
-        m = re.search(r"SUMMATION FORCE-([XYZ])\s*=\s*([-\d.Ee+]+)", U)
-        if m and cur is not None and uf:
-            out[cur]["XYZ".index(m.group(1))] = float(m.group(2)) * uf
-            if m.group(1) == "Z":
-                cur = None
-    return {k: tuple(v) for k, v in out.items() if None not in v}
-
-
+# ---------------------------------------------------------------- แรงใน member
 @dataclass
 class Forces:
     data: dict = field(default_factory=dict)   # (member, load) -> {joint: (fx, fy, fz, mx, my, mz)} N, N·mm
@@ -426,68 +392,8 @@ class Forces:
         return sorted({lc for _, lc in self.data})
 
 
-_STOP = ("REACTION", "DISPLACE", "ENVELOPE", "SECTION FORCE", "STRESS", "END OF", "STATIC LOAD",
-         "MAXIMUM", "SUMMARY", "STATICS CHECK", "MODE", "FREQUENC")
-
-
-def _units_from(line):
-    m = re.search(r"ALL\s+UNITS\s+ARE\s*-*\s*(\S+)\s+(\S+)", line.upper())
-    if not m:
-        return None
-    f, l = _unit_key(m.group(1), FORCE), _unit_key(m.group(2), LEN)
-    if not f or not l:
-        return None
-    return FORCE[f], LEN[l], f"{m.group(1)} {m.group(2)}"
-
-
-def parse_anl(text):
-    """อ่านตาราง MEMBER END FORCES ทุกชุดใน .anl → Forces (N, N·mm, แกน local ของ member)"""
-    out = Forces()
-    on, uf, ul = False, None, None
-    member = load = None
-    pending = None                       # หน่วยที่อ่านได้ก่อนเข้าหัวตาราง
-    for raw in str(text).splitlines():
-        s = raw.strip()
-        U = s.upper()
-        u = _units_from(U)
-        if u:
-            pending = u
-            if on:
-                uf, ul = u[0], u[1]
-            continue
-        if "MEMBER END FORCES" in U:
-            on, member, load = True, None, None
-            if pending:
-                uf, ul = pending[0], pending[1]
-            continue
-        if not on or not s:
-            continue
-        if any(w in U for w in _STOP) and not re.match(r"^[\d\s.Ee+-]+$", U):
-            on = False
-            continue
-        v = s.split()
-        if not all(_is_number(x) for x in v):
-            continue                     # หัวคอลัมน์ / หัวหน้ากระดาษ
-        if uf is None:
-            raise ValueError("ไม่พบบรรทัด 'ALL UNITS ARE' ก่อนตาราง MEMBER END FORCES — ไม่รู้หน่วย")
-        if len(v) == 9:
-            member, load, joint = int(float(v[0])), int(float(v[1])), int(float(v[2]))
-        elif len(v) == 8 and member is not None:
-            load, joint = int(float(v[0])), int(float(v[1]))
-        elif len(v) == 7 and load is not None:
-            joint = int(float(v[0]))
-        else:
-            continue
-        f = [float(x) for x in v[-6:]]
-        vals = (f[0] * uf, f[1] * uf, f[2] * uf, f[3] * uf * ul, f[4] * uf * ul, f[5] * uf * ul)
-        out.data.setdefault((member, load), {})[joint] = vals
-        if pending and pending[2] not in out.units:
-            out.units.append(pending[2])
-    return out
-
-
 def forces_from_table(text, parse_table, force_units, moment_units, fu=None, mu=None):
-    """ตาราง Beam End Force ที่คัดลอกจากหน้าจอ STAAD (ทุก member) → Forces เหมือนอ่านจาก .anl
+    """ตาราง Beam End Force ที่คัดลอกจากหน้าจอ STAAD (ทุก member) → Forces (N, N·mm, แกน local ของ member)
 
     parse_table / force_units / moment_units = column.parse_staad_end_forces, STAAD_FORCE_UNITS,
     STAAD_MOMENT_UNITS (ส่งเข้ามาเพื่อไม่ให้ staad_io ผูกกับ column.py)
@@ -579,96 +485,116 @@ def check_equilibrium(model, forces, member, load, tol=0.02):
 
 
 # ---------------------------------------------------------------- คาน: โมเมนต์/แรงเฉือนตลอดช่วง
-_ANL_ML = re.compile(r"^\s*(\d+)\s+(-?[\d.]+(?:E[-+]?\d+)?)\s+(G?[XYZ])\s+([\d.]+)(?:\s+([\d.]+))?\s*$", re.I)
-
-
-def parse_anl_member_loads(text):
-    """รายการ MEMBER LOAD ใน .anl (STAAD พิมพ์ load ที่แปลงจาก FLOOR LOAD และ member load ของแต่ละ LOADING)
-
-    รูปแบบที่ยืนยันกับไฟล์จริงแล้ว: "  13      -0.1406 GY   0.21" (CON ขนาด P ที่ระยะ L จาก start)
-    แถวที่มีระยะ 2 ค่าถือเป็น UDL จาก L1 ถึง L2 (⚠️ ยังไม่ได้ยืนยันกับไฟล์จริง)
-    คืน {load: {member: [dict(kind, w, dir, a, b)]}} — CON: w = N, a = ระยะ (mm); UDL: w = N/mm, a–b (mm)
-    """
-    out, cur, unit, on = {}, None, None, False
-    for raw in str(text).splitlines():
-        U = raw.upper()
-        m = re.match(r"^\s*LOADING\s+(\d+)", U)
-        if m:
-            cur, on = int(m.group(1)), False
-            continue
-        m = re.search(r"MEMBER LOAD\s*-\s*UNIT\s+(\S+)\s+(\S+)", U)
-        if m and cur is not None:
-            kf, kl = _unit_key(m.group(1), FORCE), _unit_key(m.group(2), LEN)
-            unit, on = ((FORCE[kf], LEN[kl]) if kf and kl else None), bool(kf and kl)
-            continue
-        if not on:
-            continue
-        if U.lstrip().startswith(("FOR LOADING", "STATIC", "APPLIED", "LOAD COMBINATION", "*")):
-            on = False
-            continue
-        m = _ANL_ML.match(U)
-        if not m:
-            continue
-        f, l = unit
-        mem, w, d, a, b = int(m.group(1)), float(m.group(2)), m.group(3), float(m.group(4)), m.group(5)
-        it = (dict(kind="CON", w=w * f, dir=d, a=a * l, b=a * l) if b is None else
-              dict(kind="UDL", w=w * f / l, dir=d, a=a * l, b=float(b) * l))
-        out.setdefault(cur, {}).setdefault(mem, []).append(it)
-    return out
-
-
 def _is_horizontal(model, m, tol=1e-6):
     a, b = model.members[m]
     return abs(model.joints[a][1] - model.joints[b][1]) < tol
 
 
-def beam_primary_loads(model, member, lid, anl_loads):
-    """แรงตามขวางในแกน local y (+ ขึ้น) ของคานแนวราบ beta 0 สำหรับ primary load หนึ่ง
-    — selfweight จาก PRIS × DENSITY, member load จาก .anl (ถ้ามีรายการของคานนี้ใช้รายการนั้นแทน .std
-    เพื่อไม่นับซ้ำ) หรือจาก .std; FLOOR LOAD ต้องมีรายการใน .anl ไม่เช่นนั้น ValueError
-    คืน list ของ (kind, w, a, b) หน่วย N / N·mm⁻¹, mm
+def floor_beam_loads(model, item, tol=1.0):
+    """กระจาย FLOOR LOAD ลงคานแบบเส้น 45° (two-way) — แผ่นพื้น = ช่องสี่เหลี่ยมที่มีคานล้อมครบ 4 ด้าน
+    ในระนาบ YRANGE และอยู่ใน XRANGE/ZRANGE; คานแต่ละด้านรับ w·min(t, ℓ − t, s/2) (s = ด้านสั้นของแผ่น)
+    → ด้านยาวได้สี่เหลี่ยมคางหมู ด้านสั้นได้สามเหลี่ยม (ตรงกับที่ STAAD แปลง floor load เป็น member load)
+    คืน ({member: [("LIN", w1, w2, a, b)]}, จำนวนแผ่น) หน่วย N/mm, mm (w ลบ = ลง)
+    """
+    r = item["range"]
+    inside = lambda v, ax: ax not in r or r[ax][0] - tol <= v <= r[ax][1] + tol   # noqa: E731
+    lines = {"X": {}, "Z": {}}       # แนวคาน: ("X", z) -> [(x0, x1, member)] ; ("Z", x) -> [(z0, z1, member)]
+    for m in model.beams():
+        a, b = (model.joints[j] for j in model.members[m])
+        if not (inside(a[1], "Y") and inside(b[1], "Y")):
+            continue
+        if abs(a[2] - b[2]) < tol:
+            lines["X"].setdefault(round(a[2], 3), []).append((min(a[0], b[0]), max(a[0], b[0]), m))
+        elif abs(a[0] - b[0]) < tol:
+            lines["Z"].setdefault(round(a[0], 3), []).append((min(a[2], b[2]), max(a[2], b[2]), m))
+    xs = sorted({round(v, 3) for seg in lines["X"].values() for x0, x1, _ in seg for v in (x0, x1)} | set(lines["Z"]))
+    zs = sorted({round(v, 3) for seg in lines["Z"].values() for z0, z1, _ in seg for v in (z0, z1)} | set(lines["X"]))
+
+    def covered(segs, lo, hi):
+        pos = lo
+        for s0, s1, _ in sorted(segs or []):
+            if s0 <= pos + tol and s1 > pos:
+                pos = s1
+        return pos >= hi - tol
+
+    out, n = {}, 0
+    w = item["w"]
+
+    def put(segs, lo, hi, s, ax):
+        le = hi - lo
+        knots = sorted({0.0, min(s / 2, le / 2), max(le - s / 2, le / 2), le})
+        q = lambda t: w * min(t, le - t, s / 2)            # noqa: E731
+        for s0, s1, m in segs:
+            a_, b_ = max(s0, lo), min(s1, hi)
+            if b_ - a_ <= tol:
+                continue
+            j0 = model.joints[model.members[m][0]]
+            start_lo = abs(j0[ax] - s0) < tol                 # joint start อยู่ฝั่งพิกัดน้อย?
+            ts = sorted({a_ - lo, b_ - lo} | {k for k in knots if a_ - lo < k < b_ - lo})
+            for t0, t1 in zip(ts, ts[1:]):
+                p0, p1 = lo + t0, lo + t1                    # พิกัดโลกตามแนวคาน
+                x0, x1 = (p0 - s0, p1 - s0) if start_lo else (s1 - p0, s1 - p1)
+                w0, w1 = q(t0), q(t1)
+                if x0 > x1:
+                    x0, x1, w0, w1 = x1, x0, w1, w0
+                out.setdefault(m, []).append(("LIN", w0, w1, x0, x1))
+
+    for x0, x1 in zip(xs, xs[1:]):
+        for z0, z1 in zip(zs, zs[1:]):
+            if not (inside((x0 + x1) / 2, "X") and inside((z0 + z1) / 2, "Z")):
+                continue
+            edges = [(lines["X"].get(z0), x0, x1, 0), (lines["X"].get(z1), x0, x1, 0),
+                     (lines["Z"].get(x0), z0, z1, 2), (lines["Z"].get(x1), z0, z1, 2)]
+            if not all(covered(sg, lo, hi) for sg, lo, hi, _ in edges):
+                continue
+            n += 1
+            s = min(x1 - x0, z1 - z0)
+            for sg, lo, hi, ax in edges:
+                put(sg, lo, hi, s, ax)
+    return out, n
+
+
+def beam_primary_loads(model, member, lid):
+    """แรงตามขวางในแกน local y (+ ขึ้น) ของคานแนวราบ beta 0 สำหรับ primary load หนึ่ง จาก .std
+    — selfweight จาก PRIS × DENSITY, FLOOR LOAD กระจายแบบ 45° (floor_beam_loads), MEMBER LOAD UNI / CON
+    คืน list ของ (kind, w0, w1, a, b): UDL / LIN = แรงแผ่ N/mm จาก a ถึง b (w0 → w1); CON = แรง N ที่ a
     """
     lc = model.loads[lid]
     L = model.length(member)
     out = []
-    for it in lc.items:
+    cache = model.__dict__.setdefault("_floor_cache", {})
+    for k, it in enumerate(lc.items):
         if it["type"] == "selfweight" and it["dir"] == "Y":
             mat = model.material.get(model.mat_of.get(member, ""), {})
             if member not in model.prism or "DENSITY" not in mat:
                 raise ValueError(f"member {member}: ไม่มีหน้าตัด PRIS หรือ DENSITY สำหรับ selfweight")
             YD, ZD = model.prism[member]
-            out.append(("UDL", it["factor"] * YD * ZD * mat["DENSITY"], 0.0, L))
-    listed = (anl_loads or {}).get(lid, {}).get(member)
-    if listed is not None:
-        for it in listed:
-            if it["dir"] not in ("GY", "Y"):
-                raise ValueError(f"member {member} load {lid}: แรงทิศ {it['dir']} ยังไม่รองรับ")
-            out.append((it["kind"], it["w"], it["a"], it["b"]))
-        return out
-    for it in lc.items:
-        if it["type"] == "floor":
-            raise ValueError(f"LOAD {lid} มี FLOOR LOAD แต่ไม่มีรายการ MEMBER LOAD ของคาน {member} ใน .anl — "
-                             "อัปโหลดไฟล์ .anl (STAAD พิมพ์ load ที่แปลงจาก floor load ไว้ในนั้น)")
-        if it["type"] == "member" and it["member"] == member:
+            w = it["factor"] * YD * ZD * mat["DENSITY"]
+            out.append(("UDL", w, w, 0.0, L))
+        elif it["type"] == "floor":
+            if it["dir"] != "GY":
+                raise ValueError(f"LOAD {lid}: FLOOR LOAD ทิศแนวราบยังไม่รองรับ")
+            if (lid, k) not in cache:
+                cache[(lid, k)] = floor_beam_loads(model, it)[0]
+            out += cache[(lid, k)].get(member, [])
+        elif it["type"] == "member" and it["member"] == member:
             if it["dir"] not in ("GY", "Y"):
                 raise ValueError(f"member {member} load {lid}: แรงทิศ {it['dir']} ยังไม่รองรับ")
             nums = [float(x) for x in it["rest"].split() if _is_number(x)]
             if it["kind"] == "UNI":
                 a, b = (nums[0] * 1000, nums[1] * 1000) if len(nums) >= 2 else (0.0, L)   # ⚠️ ระยะใน .std เป็นหน่วยความยาวของไฟล์
-                out.append(("UDL", it["w"], a, b))
+                out.append(("UDL", it["w"], it["w"], a, b))
             elif it["kind"] == "CON":
-                out.append(("CON", it["w"], (nums[0] * 1000 if nums else L / 2), 0.0))
+                out.append(("CON", it["w"], it["w"], (nums[0] * 1000 if nums else L / 2), 0.0))
             else:
                 raise ValueError(f"member load {it['kind']} ยังไม่รองรับ")
-        elif it["type"] == "joint" or it["type"] == "selfweight":
-            continue
     return out
 
 
-def beam_diagram(model, forces, member, load, anl_loads, n=61):
+def beam_diagram(model, forces, member, load, n=61):
     """โมเมนต์ (บวก = ดึงล่าง) และแรงเฉือนตลอดคาน จากแรงปลาย start + load บนคาน (คานแนวราบ beta 0)
 
-    M(x) = −Mz_s + Fy_s·x + Σ P(x − a) + Σ w·ℓ·(x − x̄)   ;   V(x) = Fy_s + Σ P + Σ w·ℓ  (ทางซ้ายของ x)
+    M(x) = −Mz_s + Fy_s·x + Σ P(x − a) + Σ ∫w(t)(x − t)dt   ;   V(x) = Fy_s + Σ P + Σ ∫w dt  (ทางซ้ายของ x)
     ตรวจปิด: M(L) ต้องเท่ากับ +Mz_e และ V(L) = −Fy_e จากตาราง → ยืนยันแกน/หน่วย/load ที่อ่านได้
     คืน dict(x, M, V, close_M, close_V) หน่วย mm, N·mm, N
     """
@@ -684,21 +610,24 @@ def beam_diagram(model, forces, member, load, anl_loads, n=61):
     L = model.length(member)
     items = []
     for p, f in model.expand(load).items():
-        items += [(k, f * w, x1, x2) for k, w, x1, x2 in beam_primary_loads(model, member, p, anl_loads)]
-    pts = sorted({i * L / (n - 1) for i in range(n)} | {it[2] for it in items if it[0] == "CON"})
+        items += [(k, f * w0, f * w1, x1, x2) for k, w0, w1, x1, x2 in beam_primary_loads(model, member, p)]
+    pts = sorted({i * L / (n - 1) for i in range(n)} | {it[3] for it in items if it[0] == "CON"})
     xs, Ms, Vs = [], [], []
     for x in pts:
         M, V = -s[5] + s[1] * x, s[1]
-        for k, w, x1, x2 in items:
+        for k, w0, w1, x1, x2 in items:
             if k == "CON":
                 if x1 < x - 1e-9:
-                    M += w * (x - x1)
-                    V += w
+                    M += w0 * (x - x1)
+                    V += w0
             else:
                 ln = min(max(x - x1, 0.0), x2 - x1)
-                if ln > 0:
-                    M += w * ln * (x - (x1 + ln / 2))
-                    V += w * ln
+                if ln > 0:                       # แรงแผ่เชิงเส้น w0 → w1 ส่วนที่อยู่ทางซ้ายของ x
+                    wx = w0 + (w1 - w0) * ln / ((x2 - x1) or 1.0)
+                    R = (w0 + wx) / 2 * ln
+                    xc = x1 + (ln * (w0 + 2 * wx) / (3 * (w0 + wx)) if abs(w0 + wx) > 1e-12 else ln / 2)
+                    M += R * (x - xc)
+                    V += R
         xs.append(x); Ms.append(M); Vs.append(V)
     scale_M = max(max(abs(v) for v in Ms), abs(e[5]), 1e3)
     scale_V = max(max(abs(v) for v in Vs), abs(e[1]), 1.0)
@@ -721,7 +650,7 @@ def support_face(model, member, end):
     return best
 
 
-def beam_design_values(model, forces, member, loads, anl_loads, d_eff=None, at_face=True):
+def beam_design_values(model, forces, member, loads, d_eff=None, at_face=True):
     """ค่าออกแบบของคานจาก combo กำลัง: M− ที่ผิวเสาซ้าย/ขวา, M+ สูงสุดในช่วง, Vu ที่ผิวเสา + d
     คืน dict: rows (ต่อ combo), env (ซ้าย/กลาง/ขวา → (Mu N·mm, Vu N, combo, x)), diag (ต่อ combo), faces
     """
@@ -741,7 +670,7 @@ def beam_design_values(model, forces, member, loads, anl_loads, d_eff=None, at_f
     env = {"left": (0.0, 0.0, None, fl), "mid": (0.0, 0.0, None, L / 2), "right": (0.0, 0.0, None, L - fr)}
     rows, diags = [], {}
     for lc in loads:
-        D = beam_diagram(model, forces, member, lc, anl_loads)
+        D = beam_diagram(model, forces, member, lc)
         diags[lc] = D
         mL, mR = at(D, fl, "M"), at(D, L - fr, "M")
         vL, vR = abs(at(D, min(fl + dd, L / 2), "V")), abs(at(D, max(L - fr - dd, L / 2), "V"))

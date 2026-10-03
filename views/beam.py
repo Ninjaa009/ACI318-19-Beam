@@ -47,7 +47,7 @@ mbeams = ([m for m in SM.beams() if any((m, lc) in SF.data for lc in SF.loads())
           if SM is not None and SF is not None else [])
 SRC = (["model"] if mbeams else []) + ["manual"]
 src = st.radio("แหล่งข้อมูล", SRC, horizontal=True, key=f"b_src_{len(SRC)}",
-               format_func=lambda x: {"model": "โมเดล STAAD (.std + .anl) — ขั้นที่ 1–2",
+               format_func=lambda x: {"model": "โมเดล STAAD (.std + ตาราง Beam End Force) — ขั้นที่ 1–2",
                                       "manual": "ป้อน Mu / Vu เอง"}[x])
 SECT = {"left": "ปลายซ้าย (M−, เหล็กบน)", "mid": "กลางช่วง (M+, เหล็กล่าง)", "right": "ปลายขวา (M−, เหล็กบน)"}
 if src == "model":
@@ -91,8 +91,6 @@ if src == "model":
             ss.b_h, ss.b_b = SM.prism[bm][0] / 1000, SM.prism[bm][1] / 1000
         ss.b_span = round(SM.length(bm) / 1000, 3)
         ss.b_member_prev = (bm, id(SM))
-    anl_text = ss.get("anl_text")
-    ML = S.parse_anl_member_loads(anl_text) if anl_text else {}
     strength = SM.strength_combos()
     avail = [lc for lc in SF.loads() if (bm, lc) in SF.data]
     c1, c2 = st.columns([2, 1])
@@ -105,14 +103,14 @@ if src == "model":
     R = None
     if use:
         try:
-            R = S.beam_design_values(SM, SF, bm, use, ML, d_eff=d_est, at_face=at_face)
+            R = S.beam_design_values(SM, SF, bm, use, d_eff=d_est, at_face=at_face)
         except (ValueError, KeyError) as e:
             st.error(str(e))
     if R:
         bad = [r for r in R["rows"] if r["close"] > 0.02]
         if bad:
             st.error(f"สมดุลคานไม่ปิด ({', '.join(str(r['load']) for r in bad)}): โมเมนต์ที่คำนวณถึงปลายคานไม่ตรงกับ "
-                     "ตาราง STAAD — load บนคาน (.anl) กับตารางแรงอาจไม่ใช่โมเดลเดียวกัน")
+                     "ตาราง STAAD — load บนคานจาก .std กับตารางแรงอาจไม่ใช่โมเดลเดียวกัน หรือแผ่นพื้นไม่ใช่สี่เหลี่ยมที่มีคานล้อมครบ")
         else:
             st.success("ตรวจสมดุลคานผ่าน: แรงปลาย start + load บนคาน → ได้ M และ V ที่ปลาย end ตรงกับ STAAD ทุก combo")
         ja, jb = SM.members[bm]

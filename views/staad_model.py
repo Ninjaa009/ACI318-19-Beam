@@ -1,4 +1,4 @@
-"""ขั้นที่ 1–2: นำเข้าโมเดล STAAD.Pro (.std) และผลวิเคราะห์ (.anl) — เปิดผ่าน app.py"""
+"""ขั้นที่ 1–2: นำเข้าโมเดล STAAD.Pro (.std) และตาราง Beam End Force — เปิดผ่าน app.py"""
 import pandas as pd
 import streamlit as st
 
@@ -10,7 +10,7 @@ import staad_io as S   # noqa: E402  (อยู่ใน skills/rc-column-aci318
 
 
 st.title("โมเดล STAAD.Pro")
-st.caption("ขั้นที่ 1 Geometry (.std) → ขั้นที่ 2 ผลวิเคราะห์ (.anl) → ขั้นที่ 3 ออกแบบ (หน้าเสา) · "
+st.caption("ขั้นที่ 1 Geometry (.std) → ขั้นที่ 2 ตาราง Beam End Force → ขั้นที่ 3 ออกแบบ (หน้าเสา) · "
            "อ่านแกน, หน้าตัด, start node, ความยาว, หน่วย และ combo จากไฟล์โดยตรง ไม่ต้องเดา")
 
 
@@ -24,31 +24,15 @@ def _read(up):
     return raw.decode("latin-1", "replace")
 
 
-def _anl_uploader(label, key):
-    """อัปโหลด .anl (แสดงเฉพาะเมื่อขั้นที่ 1 ยังไม่ได้ให้ .anl มา) — คืนข้อความไฟล์ หรือ None"""
-    up_ = st.file_uploader(label, type=["anl", "txt"], key=key)
-    if up_ is not None and st.session_state.get("anl_name") != up_.name + str(up_.size):
-        st.session_state.anl_text = _read(up_)
-        st.session_state.anl_name = up_.name + str(up_.size)
-    return st.session_state.get("anl_text")
-
-
 # ---------------------------------------------------------------- ขั้นที่ 1
 st.header("ขั้นที่ 1 · Geometry และน้ำหนักบรรทุก (.std)")
 c1, c2 = st.columns([3, 1])
-up = c1.file_uploader("ไฟล์ input ของ STAAD (.std) — หรือใช้ไฟล์ .anl ก็ได้ (อ่านจากสำเนา input ต้นไฟล์)",
-                      type=["std", "anl", "txt"], key="sm_std")
+up = c1.file_uploader("ไฟล์ input ของ STAAD (.std)", type=["std", "txt"], key="sm_std")
 if c2.button("ใช้โมเดลตัวอย่าง", help="โครง 1 ชั้น 3×2 ช่วง (references/staad_example/frame_3x2.std ของ skill)"):
     load_example(st.session_state)
 if up is not None and st.session_state.get("std_name") != up.name + str(up.size):
-    raw = _read(up)
-    echo = S.extract_input_echo(raw) if up.name.lower().endswith((".anl", ".txt")) else None
-    st.session_state.std_text = echo or raw
+    st.session_state.std_text = _read(up)
     st.session_state.std_name = up.name + str(up.size)
-    st.session_state.pop("anl_text", None)
-    if echo:                                        # .anl ไฟล์เดียว: ใช้เป็นผลวิเคราะห์ด้วย
-        st.session_state.anl_text = raw
-        st.session_state.anl_name = up.name + str(up.size)
 
 if not st.session_state.get("std_text"):
     st.info("อัปโหลดไฟล์ .std หรือกด **ใช้โมเดลตัวอย่าง**")
@@ -130,84 +114,30 @@ if not any(M.is_lateral(c.id) for c in M.combos()):
 
 # ---------------------------------------------------------------- ขั้นที่ 2
 st.header("ขั้นที่ 2 · ผลวิเคราะห์ (แรงใน member)")
-SRC2 = {"table": "วางตาราง Beam End Force จาก STAAD (แนะนำ)", "anl": "อัปโหลดไฟล์ .anl"}
-src2 = st.radio("แหล่งแรง", list(SRC2), horizontal=True, key="sm_src2", format_func=SRC2.get)
-anl_text = st.session_state.get("anl_text")
-if src2 == "table":
-    st.caption("ใน STAAD (หน้า Postprocessing) เปิดตาราง **Beam End Force** → คลิกมุมซ้ายบนของตารางเพื่อเลือกทั้งหมด → "
-               "**Ctrl+C** → วางข้างล่าง · ต้องติดแถวหัวตาราง (มีหน่วย เช่น kg, kN-m) มาด้วย · "
-               "แถวที่เว้น Beam / L/C ว่างไว้ แอปเติมจากแถวบนให้เอง · **วางทั้งตารางครั้งเดียว ใช้ได้ทั้งหน้าเสาและหน้าคาน** "
-               "(แต่ละ L/C มี 2 แถว = ปลาย start กับปลาย end ของ member ไม่ใช่ข้อมูลซ้ำ)")
-    tbl = st.text_area("ตาราง Beam End Force (ทุก member)", height=180, key="sm_table",
-                       placeholder="Beam\tL/C\tNode\tAxial Force kg\tShear-Y kg\t...")
-    if anl_text:        # มี .anl จากขั้นที่ 1 แล้ว — ไม่ต้องขออัปโหลดซ้ำ
-        st.caption("✓ ใช้ไฟล์ .anl ที่มีอยู่แล้ว (ตรวจน้ำหนักรวม + load บนคานสำหรับหน้าออกแบบคาน) — ไม่ต้องอัปโหลดซ้ำ")
-    else:
-        anl_text = _anl_uploader("ไฟล์ .anl (ไม่บังคับ — ใช้หา load บนคาน สำหรับออกแบบคาน และตรวจน้ำหนักรวม)",
-                                 "sm_anl2") or None
-    if not tbl.strip():
-        st.info("วางตารางเพื่อไปขั้นที่ 3")
-        st.session_state.pop("staad_forces", None)
-        st.stop()
-    try:
-        Fo = S.forces_from_table(tbl, C.parse_staad_end_forces, C.STAAD_FORCE_UNITS, C.STAAD_MOMENT_UNITS)
-    except ValueError as e:
-        st.error(str(e))
-        st.session_state.pop("staad_forces", None)
-        st.stop()
-    if not Fo.data:
-        st.error("อ่านแถวข้อมูลไม่ได้ — ต้องมีคอลัมน์ Beam, L/C, Node, Axial, Shear-Y, Shear-Z, Torsion, Moment-Y, Moment-Z")
-        st.session_state.pop("staad_forces", None)
-        st.stop()
-else:
-    st.caption("ไฟล์ .anl ต้องมีตาราง MEMBER END FORCES — ในไฟล์ .std ต้องมีบรรทัด `PRINT MEMBER FORCES` ต่อจาก "
-               "`PERFORM ANALYSIS` (`PRINT ALL` อย่างเดียวไม่พิมพ์แรงใน member) · หน่วยอ่านจากบรรทัด `ALL UNITS ARE` · "
-               "ไฟล์เดียวใช้ได้ทั้งเสาและคาน")
-    if anl_text:
-        st.caption("✓ ใช้ไฟล์ .anl จากขั้นที่ 1 — ไม่ต้องอัปโหลดซ้ำ")
-    else:
-        anl_text = _anl_uploader("ไฟล์ผลวิเคราะห์ (.anl)", "sm_anl")
-    if not anl_text:
-        st.info("อัปโหลดไฟล์ .anl เพื่อไปขั้นที่ 3")
-        st.session_state.pop("staad_forces", None)
-        st.stop()
-    try:
-        Fo = S.parse_anl(anl_text)
-    except ValueError as e:
-        st.error(str(e))
-        st.stop()
-# ตรวจน้ำหนักรวมของแต่ละ load: STAAD (SUMMATION FORCE-Y) เทียบกับที่แอปคำนวณจาก geometry/หน้าตัด/หน่วยที่อ่านได้
-tot = S.applied_totals(anl_text) if anl_text else {}
-if tot:
-    rows, ok_all = [], True
-    for lid, (fx, fy, fz) in sorted(tot.items()):
-        est, how = M.vertical_total(lid) if lid in M.loads and M.loads[lid].kind == "primary" else (None, "")
-        diff = None if est is None or abs(fy) < 1e-9 else (est - fy) / abs(fy)
-        ok = diff is not None and abs(diff) <= 0.01
-        ok_all &= ok or est is None
-        rows.append({"LOAD": lid, "ชื่อ": M.loads[lid].title if lid in M.loads else "",
-                     "STAAD ΣFy (kN)": fy / 1e3, "แอปคำนวณ (kN)": None if est is None else est / 1e3,
-                     "ต่าง (%)": None if diff is None else diff * 100, "วิธี": how,
-                     "ผล": "✓" if ok else ("ตรวจไม่ได้" if est is None else "✗")})
-    with st.expander("ตรวจน้ำหนักรวมแต่ละ load กับ STAAD", expanded=not ok_all):
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
-                     column_config={c: st.column_config.NumberColumn(format="%.2f")
-                                    for c in ("STAAD ΣFy (kN)", "แอปคำนวณ (kN)", "ต่าง (%)")})
-    (st.success if ok_all else st.warning)(
-        "น้ำหนักรวมทุก load ตรงกับ STAAD (±1%) — geometry, หน้าตัด, วัสดุ และหน่วยที่อ่านจาก .std ถูกต้อง"
-        if ok_all else "น้ำหนักรวมบาง load ไม่ตรงกับ STAAD — ตรวจว่าไฟล์ .std กับ .anl เป็นโมเดลเดียวกัน")
-if src2 == "anl" and not Fo.data:
-    st.error("**ไฟล์ .anl นี้ไม่มีตาราง MEMBER END FORCES** — `PERFORM ANALYSIS PRINT ALL` ไม่ได้พิมพ์แรงใน member "
-             "ให้เพิ่มคำสั่งพิมพ์ในไฟล์ .std ต่อจากบรรทัด PERFORM ANALYSIS แล้วรันใหม่:")
-    st.code("PERFORM ANALYSIS PRINT ALL\nPRINT MEMBER FORCES\nFINISH", language=None)
-    st.caption("ถ้าโมเดลใหญ่ พิมพ์เฉพาะเสาได้ เช่น `PRINT MEMBER FORCES LIST 1 TO 12` · ใน STAAD ทำผ่านเมนู "
-               "Analysis → Post-Analysis Print → Member Forces ก็ได้ · หรือเลือก **วางตาราง Beam End Force** แทน")
+st.caption("ใน STAAD (หน้า Postprocessing) เปิดตาราง **Beam End Force** → คลิกมุมซ้ายบนของตารางเพื่อเลือกทั้งหมด → "
+           "**Ctrl+C** → วางข้างล่าง · ต้องติดแถวหัวตาราง (มีหน่วย เช่น kg, kN-m) มาด้วย · "
+           "แถวที่เว้น Beam / L/C ว่างไว้ แอปเติมจากแถวบนให้เอง · **วางทั้งตารางครั้งเดียว ใช้ได้ทั้งหน้าเสาและหน้าคาน** "
+           "(แต่ละ L/C มี 2 แถว = ปลาย start กับปลาย end ของ member ไม่ใช่ข้อมูลซ้ำ)")
+tbl = st.text_area("ตาราง Beam End Force (ทุก member)", height=180, key="sm_table",
+                   placeholder="Beam\tL/C\tNode\tAxial Force kg\tShear-Y kg\t...")
+if not tbl.strip():
+    st.info("วางตารางเพื่อไปขั้นที่ 3")
+    st.session_state.pop("staad_forces", None)
+    st.stop()
+try:
+    Fo = S.forces_from_table(tbl, C.parse_staad_end_forces, C.STAAD_FORCE_UNITS, C.STAAD_MOMENT_UNITS)
+except ValueError as e:
+    st.error(str(e))
+    st.session_state.pop("staad_forces", None)
+    st.stop()
+if not Fo.data:
+    st.error("อ่านแถวข้อมูลไม่ได้ — ต้องมีคอลัมน์ Beam, L/C, Node, Axial, Shear-Y, Shear-Z, Torsion, Moment-Y, Moment-Z")
     st.session_state.pop("staad_forces", None)
     st.stop()
 
 unknown = [m for m in Fo.members() if m not in M.members]
 if unknown:
-    st.error(f"member {unknown[:10]} อยู่ใน .anl แต่ไม่มีใน .std — ไฟล์ไม่ใช่โมเดลเดียวกัน?")
+    st.error(f"member {unknown[:10]} อยู่ในตารางแรงแต่ไม่มีใน .std — ไฟล์ไม่ใช่โมเดลเดียวกัน?")
     st.stop()
 st.session_state.staad_forces = Fo
 # ตรวจว่าแรงครบทุกเสา: แรงอัดที่ฐานเสาทุกต้นรวมกัน = น้ำหนักแนวดิ่งรวมที่คำนวณจาก .std
@@ -260,7 +190,7 @@ for m in fcols:
                 bad.append((m, lc, err))
 if bad:
     st.error(f"สมดุลของเสาไม่ตรง {len(bad)} รายการ (เช่น member {bad[0][0]} load {bad[0][1]}) — "
-             "อาจมีแรงกระทำกลางเสา หรือไฟล์ .anl ไม่ตรงกับ .std")
+             "อาจมีแรงกระทำกลางเสา หรือตารางแรงไม่ตรงกับ .std")
 else:
     st.success("ตรวจสมดุลเสาทุกต้นทุก load ผ่าน (|F|·L = |Mt| ± |Mb| ด้วยความยาวจาก geometry) — "
                "แกน หน่วย และ start/end ถูกต้อง")

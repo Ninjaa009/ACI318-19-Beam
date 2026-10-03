@@ -1,4 +1,4 @@
-"""ทดสอบ workflow ใหม่: ขั้นที่ 1 .std → ขั้นที่ 2 .anl → ขั้นที่ 3 ออกแบบเสาจากโมเดล"""
+"""ทดสอบ workflow: ขั้นที่ 1 .std → ขั้นที่ 2 ตาราง Beam End Force → ขั้นที่ 3 ออกแบบเสาจากโมเดล"""
 from pathlib import Path
 
 import pytest
@@ -9,14 +9,17 @@ import staad_io as S  # noqa: E402
 
 EX = Path(__file__).resolve().parent.parent / "skills" / "rc-column-aci318m19" / "references" / "staad_example"
 STD = (EX / "frame_3x2.std").read_text()
-ANL = (EX / "frame_3x2_cols11_12.anl").read_text()
+TABLE = (EX / "frame_3x2_beam_end_force.txt").read_text()
+
+
+def _table_forces():
+    return S.forces_from_table(TABLE, C.parse_staad_end_forces, C.STAAD_FORCE_UNITS, C.STAAD_MOMENT_UNITS)
 
 
 def test_model_page_reads_example_and_checks_equilibrium():
     at = AppTest.from_file("../views/staad_model.py", default_timeout=60)
     at.session_state["std_text"], at.session_state["std_name"] = STD, "x"
-    at.session_state["anl_text"], at.session_state["anl_name"] = ANL, "y"
-    at.session_state["sm_src2"] = "anl"
+    at.session_state["sm_table"] = TABLE
     at.run()
     assert not at.exception and not at.error
     assert any("ตรวจสมดุลเสาทุกต้นทุก load ผ่าน" in s.value for s in at.success)
@@ -32,10 +35,11 @@ def test_model_page_without_files_asks_for_std():
 def test_column_page_from_model_prefills_and_designs():
     at = AppTest.from_file("../views/column.py", default_timeout=60)
     at.session_state["staad_model"] = S.parse_std(STD)
-    at.session_state["staad_forces"] = S.parse_anl(ANL)
+    at.session_state["staad_forces"] = _table_forces()
     at.run()
     assert not at.exception
-    assert at.selectbox(key="c_member").value == 11
+    assert at.selectbox(key="c_member").value == 1
+    at.selectbox(key="c_member").set_value(11).run()
     assert at.number_input(key="c_h").value == pytest.approx(0.5)      # YD จาก PRIS
     assert at.number_input(key="c_b").value == pytest.approx(0.4)
     assert at.number_input(key="c_L").value == pytest.approx(3.5)
@@ -50,24 +54,6 @@ def test_column_page_from_model_prefills_and_designs():
     assert [e.value for e in at.error] == ["มีรายการไม่ผ่าน — ดูตารางสรุป"]
 
 
-REAL = (EX / "frame_3x2_real_noforces.anl").read_text()
-
-
-def test_real_anl_without_member_forces_explains_fix():
-    """.anl จริง (PRINT ALL อย่างเดียว): ใช้แทน .std ได้, น้ำหนักรวมตรง STAAD, และบอกให้เพิ่ม PRINT MEMBER FORCES"""
-    at = AppTest.from_file("../views/staad_model.py", default_timeout=60)
-    at.session_state["std_text"], at.session_state["std_name"] = S.extract_input_echo(REAL), "x"
-    at.session_state["anl_text"], at.session_state["anl_name"] = REAL, "x"
-    at.session_state["sm_src2"] = "anl"
-    at.run()
-    assert not at.exception
-    assert any("น้ำหนักรวมทุก load ตรงกับ STAAD" in s.value for s in at.success)
-    assert any("ไม่มีตาราง MEMBER END FORCES" in e.value for e in at.error)
-    assert any("PRINT MEMBER FORCES" in c.value for c in at.code)
-    assert "staad_forces" not in at.session_state
-
-
-TABLE = (EX / "frame_3x2_beam_end_force.txt").read_text()
 
 
 def test_pasted_beam_end_force_table_all_columns():

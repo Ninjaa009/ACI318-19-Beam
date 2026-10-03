@@ -253,7 +253,7 @@ def run():
     rows3, _, _ = C.parse_staad_end_forces("5   101 1.2D+1.6L   3   100   1   2   0   3   4")
     check_true("C12", "L/C มีชื่อต่อท้าย", rows3 and rows3[0]["lc"] == "101 1.2D+1.6L" and rows3[0]["node"] == "3")
 
-    # ---------------- C13 อ่านไฟล์ STAAD .std + .anl ----------------
+    # ---------------- C13 อ่านไฟล์ STAAD .std + ตาราง Beam End Force ----------------
     import staad_io as SIO
     ex = Path(__file__).resolve().parent.parent / "references" / "staad_example"
     Mo = SIO.parse_std((ex / "frame_3x2.std").read_text())
@@ -268,25 +268,8 @@ def run():
                and Mo.is_service(103))
     check_true("C13", "ไม่มีแรงด้านข้างในทุก combo", not any(Mo.is_lateral(c) for c in (101, 102, 103)))
     check_true("C13", "FCU 25 MPa อ่านเป็น MPa", abs(Mo.material["CONC_C25"]["STRENGTH FCU"] - 25) < 1e-9)
-    Fo = SIO.parse_anl((ex / "frame_3x2_cols11_12.anl").read_text())
-    check_true("C13", ".anl: หน่วย KN METE, เสา 11–12, load 1–3 และ 101–103 (ข้ามหัวหน้ากระดาษ)",
-               Fo.units == ["KN METE"] and Fo.members() == [11, 12] and Fo.loads() == [1, 2, 3, 101, 102, 103])
-    f = SIO.column_forces(Mo, Fo, 11, 102, C.from_staad)
-    check("C13", "เสา 11 COMB 102: P = Fx(N11) = 13,377.765 kg (kN)", f["Pu"] / 1e3, 13377.765 * 9.80665e-3, 0.001)
-    check("C13", "เสา 11 COMB 102: |My| end = 28.560 kN·m", f["Myt"] / 1e6, 28.560, 1e-6)
-    check_true("C13", "สมดุลเสาทุก load ด้วย L จาก geometry",
-               all(SIO.check_equilibrium(Mo, Fo, m, lc)[0] for m in (11, 12) for lc in Fo.loads()))
-    d = Fo.data[(12, 1)]
-    check("C13", "น้ำหนักเสาเอง = Fx(N12) + Fx(N24) = 0.5×0.4×3.5×24 (kN)", (d[12][0] + d[24][0]) / 1e3, 16.8, 0.01)
     check_true("C13", "ids: '1 TO 7 BY 3 10' → [1, 4, 7, 10]", SIO.ids("1 TO 7 BY 3 10") == [1, 4, 7, 10])
-    real = (ex / "frame_3x2_real_noforces.anl").read_text()       # .anl จริงจาก STAAD.Pro 2025 (ตัดบางส่วน)
-    Me = SIO.parse_std(SIO.extract_input_echo(real))
-    check_true("C13", ".anl จริง: อ่านสำเนา input ต้นไฟล์ได้โมเดลเดียวกับ .std",
-               (Me.joints, Me.members, Me.prism, Me.strength_combos())
-               == (Mo.joints, Mo.members, Mo.prism, Mo.strength_combos()))
-    tot = SIO.applied_totals(real)
-    for lid, exp in ((1, -507.60), (2, -432.00), (3, -294.20)):
-        check("C13", f"LOAD {lid}: ΣFy จาก .anl จริง (kN)", tot[lid][1] / 1e3, exp, 1e-9)
+    for lid, exp in ((1, -507.60), (2, -432.00), (3, -294.20)):     # ΣFy ที่ STAAD.Pro 2025 พิมพ์ของโมเดลนี้
         check("C13", f"LOAD {lid}: ΣFy ที่คำนวณจาก .std (kN) เทียบ STAAD", Mo.vertical_total(lid)[0] / 1e3, exp, 0.01)
     Ft = SIO.forces_from_table((ex / "frame_3x2_beam_end_force.txt").read_text(), C.parse_staad_end_forces,
                                C.STAAD_FORCE_UNITS, C.STAAD_MOMENT_UNITS)
@@ -309,35 +292,33 @@ def run():
     fr = SIO.column_forces(Mr, Fr, 1, 9, C.from_staad)
     check_true("C13", "start อยู่บน: Mz บน = ค่าที่ joint บน (20), ล่าง = 10; Pu ตีนเสา = −Fx(end) = 100 kN",
                (fr["Mxt"], fr["Mxb"], fr["Myt"], fr["Myb"], fr["Pu"]) == (20e6, 10e6, 3e6, 4e6, 100e3))
-    check_true("C13", ".anl จริงที่ใช้ PRINT ALL อย่างเดียว: ไม่มีตาราง MEMBER END FORCES → ว่าง (แอปแนะนำ PRINT MEMBER FORCES)",
-               not SIO.parse_anl(real).data)
-    try:
-        SIO.parse_anl("MEMBER END FORCES\n  1 1 1 1 2 3 4 5 6")
-        nounit = False
-    except ValueError:
-        nounit = True
-    check_true("C13", ".anl ไม่มีบรรทัดหน่วย → หยุด (ไม่เดาหน่วย)", nounit)
-    # ---------------- C14 คาน: M(x), V(x) จากแรงปลาย + load บนคาน (.anl จริง) ----------------
-    ML = SIO.parse_anl_member_loads(real)
-    check_true("C14", ".anl จริง: MEMBER LOAD ของ LOAD 2, 3 — คานริม 13 ได้ 16 แรง, คานใน 24 ได้ 32 แรง (สองแผ่นพื้น)",
-               len(ML[2][13]) == 16 and len(ML[2][24]) == 32 and len(ML[3][24]) == 32)
-    check("C14", "LOAD 2 คาน 13: ΣP = 2.88 kN/m² × พื้นที่สามเหลี่ยม 6.25 m² (kN)",
-          -sum(it["w"] for it in ML[2][13]) / 1e3, 18.0, 0.01)
-    worst = max(max(SIO.beam_diagram(Mo, Ft, m, lc, ML)["close_M"], SIO.beam_diagram(Mo, Ft, m, lc, ML)["close_V"])
+    d = Ft.data[(12, 1)]
+    check("C13", "น้ำหนักเสาเอง = Fx(N12) + Fx(N24) = 0.5×0.4×3.5×24 (kN)", (d[12][0] + d[24][0]) / 1e3, 16.8, 0.02)
+    # ---------------- C14 คาน: FLOOR LOAD 45° จาก .std + M(x), V(x) จากแรงปลาย ----------------
+    fl2 = [it for it in Mo.loads[2].items if it["type"] == "floor"][0]
+    FL, npan = SIO.floor_beam_loads(Mo, fl2)
+    tot = lambda m: sum((w0 + w1) / 2 * (b - a) for _, w0, w1, a, b in FL[m])            # noqa: E731
+    mom = lambda m: sum((w0 + w1) / 2 * (b - a) * (a + (b - a) * (w0 + 2 * w1) / (3 * (w0 + w1)))  # noqa: E731
+                        for _, w0, w1, a, b in FL[m])
+    check_true("C14", "FLOOR LOAD 2: พบแผ่นพื้น 6 แผ่น (5×5 m) ส่งแรงลงคานทั้ง 17 ตัว", npan == 6 and sorted(FL) == list(range(13, 30)))
+    # ค่าที่ STAAD.Pro 2025 แปลง floor load เป็น member load (16 แรงคานริม / 32 แรงคานใน) ของโมเดลเดียวกัน
+    check("C14", "คานริม 13: ΣP = 2.88 × สามเหลี่ยม 6.25 m² เทียบ STAAD (kN)", -tot(13) / 1e3, 18.0, 1e-6)
+    check("C14", "คานใน 24 (สองแผ่น) เทียบ STAAD (kN)", -tot(24) / 1e3, 36.0, 1e-6)
+    check("C14", "คาน 13: ΣP·x รอบ start เทียบ STAAD (kN·m)", -mom(13) / 1e6, 45.0, 1e-6)
+    m2 = sum(sum((w0 + (w1 - w0) * (t + 0.5) / 400) * ((a + (b - a) * (t + 0.5) / 400) ** 2) * (b - a) / 400
+                 for t in range(400)) for _, w0, w1, a, b in FL[13])
+    check("C14", "คาน 13: ΣP·x² (รูปสามเหลี่ยม 45°) เทียบ STAAD 131.11 (kN·m²)", -m2 / 1e9, 131.11, 0.2)
+    worst = max(max(SIO.beam_diagram(Mo, Ft, m, lc)["close_M"], SIO.beam_diagram(Mo, Ft, m, lc)["close_V"])
                 for m in (13, 14, 17, 24) for lc in Ft.loads())
     check_true("C14", "สมดุลปิด: คาน 13, 14, 17, 24 × 6 load — M(L) = Mz_e และ V(L) = −Fy_e (คลาดเคลื่อน < 0.1%)",
                worst < 1e-3, f"สูงสุด {worst:.1e}")
-    Rb = SIO.beam_design_values(Mo, Ft, 13, [101, 102], ML, d_eff=440)
+    Rb = SIO.beam_design_values(Mo, Ft, 13, [101, 102], d_eff=440)
     check_true("C14", "ผิวเสาคาน 13 = YD/2 ของเสา 1 และเสา 2 (YD ขนานแกน X) = 250 mm", Rb["faces"] == (250.0, 250.0))
-    check("C14", "คาน 13 M+ สูงสุด COMB 102 (kN·m)", Rb["env"]["mid"][0] / 1e6, 21.07, 0.01)
+    # STAAD ใช้แรงจุด 16 แรงแทนสามเหลี่ยม → M+ จากรายการแรงจุดใน .anl = 21.07; สามเหลี่ยมต่อเนื่อง = 20.86 (ต่าง 1%)
+    check("C14", "คาน 13 M+ สูงสุด COMB 102 — floor load สามเหลี่ยม 45° (kN·m)", Rb["env"]["mid"][0] / 1e6, 20.86, 0.01)
+    check("C14", "… เทียบ 21.07 ที่คิดจากแรงจุดของ STAAD (ต่างไม่เกิน 1.5%)", Rb["env"]["mid"][0] / 1e6, 21.07, 0.32)
     check_true("C14", "คาน 13 M− ที่ผิวเสาทั้งสองข้างเป็นลบ (ดึงบน) และปลาย end มากกว่า (ต่อเนื่อง)",
                Rb["env"]["left"][0] < 0 and Rb["env"]["right"][0] < Rb["env"]["left"][0])
-    try:
-        SIO.beam_diagram(Mo, Ft, 13, 2, {})
-        miss = False
-    except ValueError as e:
-        miss = "FLOOR LOAD" in str(e)
-    check_true("C14", "ไม่มี .anl (load ที่แปลงจาก floor load) → หยุดพร้อมบอกเหตุ ไม่เดา", miss)
     return ROWS
 
 

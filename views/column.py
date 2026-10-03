@@ -28,7 +28,7 @@ st.caption("หน้าตัดสี่เหลี่ยม ปลอกเ�
 SM, SF = st.session_state.get("staad_model"), st.session_state.get("staad_forces")
 SRC = (["model"] if SM is not None and SF is not None else []) + ["manual"]
 src = st.radio("แหล่งข้อมูล", SRC, horizontal=True, key=f"c_src_{len(SRC)}",
-               format_func=lambda x: {"model": "โมเดล STAAD (.std + .anl) — ขั้นที่ 1–2",
+               format_func=lambda x: {"model": "โมเดล STAAD (.std + ตาราง Beam End Force) — ขั้นที่ 1–2",
                                       "manual": "ป้อน Mz / My เอง"}[x])
 sel = None
 for _k, _v in (("c_h", 0.40), ("c_b", 0.40), ("c_L", 5.0), ("c_lux", 4.5), ("c_luy", 4.5)):
@@ -199,7 +199,7 @@ if mode == "model":
     c2.markdown("**ตรวจเครื่องหมาย P:** ใช้ combo ที่ไม่มีแรงด้านข้าง (อ่านจากนิยาม load ในไฟล์ .std)")
     a_, b_ = SM.members[sel]
     st.caption(f"member {sel}: start = N{a_} ({'ล่าง' if SM.bottom_top(sel)[0] == a_ else 'บน'}), end = N{b_} · "
-               f"P = Fx ที่ N{a_} · Mz คู่ Fy (ความลึก YD) · My คู่ Fz (ความลึก ZD) · หน่วยจาก .anl: "
+               f"P = Fx ที่ N{a_} · Mz คู่ Fy (ความลึก YD) · My คู่ Fz (ความลึก ZD) · หน่วยจากหัวตาราง: "
                f"{', '.join(SF.units)}")
     rows_in = []
     for lc in use:

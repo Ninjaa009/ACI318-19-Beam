@@ -2,14 +2,8 @@
 
 - `frame_3x2.std` — ไฟล์ input จริงจากผู้ใช้: เสา 1–12 PRIS YD 0.5 × ZD 0.4 m สูง 3.5 m, คาน YD 0.5 × ZD 0.3 m,
   LOAD 1–3 (DL, slab DL, LL), COMB 101 (1.4D), 102 (1.2D+1.6L), 103 (D+L service)
-- `frame_3x2_cols11_12.anl` — **จำลอง**รูปแบบตาราง MEMBER END FORCES ของ STAAD (`ALL UNITS ARE -- KN METE`)
-  จากตาราง Beam End Force ที่ผู้ใช้คัดลอกจาก STAAD สำหรับเสา 11 และ 12 (แรง kg × 0.00980665 → kN, โมเมนต์ kN·m)
-  ⚠️ ยังไม่ใช่ไฟล์ .anl จริง — ต้องทดสอบ `parse_anl` กับไฟล์จริงของผู้ใช้
-- `frame_3x2_real_noforces.anl` — ไฟล์ .anl **จริง** จาก STAAD.Pro 2025 ของโมเดลเดียวกัน (รายการ MEMBER LOAD ของ LOAD 2–3 ครบทุกคาน
-  ตามไฟล์จริง แต่ตัดหัวหน้ากระดาษบางส่วน; APPLIED JOINT EQUIVALENT LOADS / reaction ตัดให้สั้นลง) — ใช้ `PERFORM ANALYSIS PRINT ALL` อย่างเดียวจึง**ไม่มีตาราง MEMBER END FORCES**
-  ต้องเพิ่ม `PRINT MEMBER FORCES` แล้วรันใหม่ · ใช้ทดสอบ `extract_input_echo` (สำเนา input ต้นไฟล์) และ `applied_totals`
-  (ΣFy: LOAD 1 = −507.60, LOAD 2 = −432.00, LOAD 3 = −294.20 kN ตรงกับ `Model.vertical_total`)
+  · ΣFy ที่ STAAD.Pro 2025 พิมพ์: LOAD 1 = −507.60, LOAD 2 = −432.00, LOAD 3 = −294.20 kN (ตรงกับ `Model.vertical_total`)
+  · FLOOR LOAD ที่ STAAD แปลงเป็นแรงบนคาน: คานริมรับ 18.0 kN (LOAD 2) ทรงสามเหลี่ยม — ตรงกับ `floor_beam_loads` (เส้น 45°)
 - `frame_3x2_beam_end_force.txt` — ตาราง **Beam End Force จริง** ที่คัดลอกจากหน้าจอ STAAD (แรง kg, โมเมนต์ kN-m;
   Beam และ L/C พิมพ์เฉพาะแถวแรกของกลุ่ม) — เสา 1–12 และคาน 13, 14, 17, 24 ครบทุก load
-  (คานอื่นตัดออก) · Σ แรงอัดฐานเสา = 507.60 / 432.00 / 294.20 kN ตรงกับ .anl
-- `frame_3x2_cols11_12.anl` (ด้านบน) ใช้ทดสอบ `parse_anl` เท่านั้น — รูปแบบตาราง MEMBER END FORCES ใน .anl ยังไม่ได้ยืนยันกับไฟล์จริง
+  (คานอื่นตัดออก) · Σ แรงอัดฐานเสา = 507.60 / 432.00 / 294.20 kN ตรงกับน้ำหนักรวม
