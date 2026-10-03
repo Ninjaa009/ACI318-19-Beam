@@ -32,3 +32,19 @@ def test_beam_click_selects_and_interior_beam_has_larger_moment():
     assert at.selectbox(key="b_member").value == 24
     assert at.number_input(key="b_span").value == pytest.approx(5.0)
     assert any("ตรวจสมดุลคานผ่าน" in s.value for s in at.success)
+
+
+def test_user_can_skip_minimum_stirrups():
+    at = _page()
+    at.radio(key="b_sec").set_value("mid").run()
+    at.checkbox(key="b_always_min").uncheck().run()
+    next(b for b in at.button if b.label == "ออกแบบ").click().run()
+    assert not at.exception
+    assert any("ไม่ใส่ปลอก" in m.value for m in at.markdown)
+    at.checkbox(key="b_always_min").check().run()
+    assert any("ปลอก 2 ขา" in m.value for m in at.markdown)
+
+
+def test_docs_page_renders():
+    at = AppTest.from_file("../views/docs.py", default_timeout=60).run()
+    assert not at.exception and len(at.tabs) == 8

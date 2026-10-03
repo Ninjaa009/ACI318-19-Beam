@@ -120,8 +120,8 @@ def design_stirrups(Vu, fc, fyt, bw, d, As, ds, legs, lam=1.0,
     no = check_stirrups(Vu, fc, fyt, bw, d, As, ds, legs, 0.0, lam,
                         exempt_9631, vc_simple)
     if not no.min_required and no.strength_ok and not always_min:
-        no.notes.append("ไม่ต้องใช้ปลอกตามการคำนวณ (Vc จากสมการ (c)) "
-                        "แต่ในทางปฏิบัติควรใส่ปลอกขั้นต่ำ")
+        no.notes.append("ACI ไม่บังคับปลอก และผู้ออกแบบเลือกไม่ใส่ปลอกขั้นต่ำ → Vc จากสมการ (c) "
+                        "(มี size effect λs) — ในทางปฏิบัติแนะนำให้ใส่ปลอกขั้นต่ำ")
         return no
 
     Av = legs * bar_area(ds)

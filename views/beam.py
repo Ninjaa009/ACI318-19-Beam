@@ -203,6 +203,11 @@ with st.sidebar:
     vc_simple = st.radio("สมการ Vc เมื่อ Av ≥ Av,min", ["a", "b"], horizontal=True,
                          format_func=lambda x: {"a": "(a) 0.17λ√f′c", "b": "(b) ρw^⅓"}[x])
     exempt = st.checkbox("เข้าข้อยกเว้น Table 9.6.3.1", value=False)
+    always_min = st.checkbox(
+        "ใส่ปลอกขั้นต่ำเสมอ แม้ ACI ไม่บังคับ", value=True, key="b_always_min",
+        help="เมื่อ Vu ≤ 0.083φλ√f′c·bw·d (หรือเข้าข้อยกเว้น) ACI ไม่บังคับปลอก — "
+             "ติ๊ก = ใส่ Av,min @ s ≤ d/2 (แนะนำ: ยึดเหล็กยืน กันวิบัติเฉือนแบบเปราะ, ได้ใช้ Vc สมการ (a)/(b)) · "
+             "ไม่ติ๊ก = ไม่ใส่ปลอก ใช้ Vc สมการ (c) ที่มี size effect λs")
 
     st.header("ความลึกขั้นต่ำ (ไม่บังคับ)")
     span = u.m_to_mm(st.number_input("ช่วงคาน ℓ (m), 0 = ไม่ตรวจ", min_value=0.0, max_value=30.0, step=0.5,
@@ -312,7 +317,7 @@ with tab_design:
         D = design_flexure(b, h, fc, fy, inp.Mu, cover, ds, db, db_c, dagg, ety)
         fr = D.result
         sr = design_stirrups(inp.Vu, fc, fyt, b, fr.d, fr.As, ds, int(legs),
-                             exempt_9631=exempt, vc_simple=vc_simple)
+                             exempt_9631=exempt, vc_simple=vc_simple, always_min=always_min)
         kind = {"singly": "Singly reinforced", "doubly": "Doubly reinforced",
                 "fail": "ออกแบบไม่สำเร็จ"}[D.kind]
         side_t, side_c = ("ล่าง", "บน") if inp.Mu >= 0 else ("บน", "ล่าง")
@@ -320,7 +325,7 @@ with tab_design:
         if D.n_c and D.kind != "singly":
             steel += f" · เหล็กอัด ({side_c}) {D.n_c}-DB{db_c} ({cm2(fr.As_comp)})"
         stir = (f"ปลอก {int(legs)} ขา Ø{ds} @ {sr.s:.0f} mm" if sr.s > 0
-                else "ไม่ต้องใช้ปลอกตามการคำนวณ")
+                else "ไม่ใส่ปลอก (ACI ไม่บังคับ — ผู้ออกแบบเลือกไม่ใส่ปลอกขั้นต่ำ)")
         st.subheader(f"{kind}: {steel}")
         st.markdown(f"**{stir}**")
         for n in D.notes:
