@@ -516,7 +516,7 @@ def forces_from_table(text, parse_table, force_units, moment_units, fu=None, mu=
             continue
         out.data.setdefault((m, lc), {})[j] = (r["fx"] * kf, r["fy"] * kf, r["fz"] * kf,
                                                 r["mx"] * km, r["my"] * km, r["mz"] * km)
-    out.units = [f"{fu}, {mu} (ตาราง Beam End Force)"]
+    out.units = [f"{fu}, {mu}"]
     out.tables = 1
     return out
 
