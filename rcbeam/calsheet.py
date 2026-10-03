@@ -342,6 +342,8 @@ def _shear(D, inp, sr):
          rf"{_n(thr / 1e3, 1)}\ \mathrm{{kN}}\ {_ge(not sr.min_required)}\ V_u",
          ref="ACI 9.6.3.1")
     D.p("∴ ต้องใส่เหล็กปลอกไม่น้อยกว่าปริมาณขั้นต่ำ" if sr.min_required
+        else "∴ ACI ไม่บังคับเหล็กปลอกขั้นต่ำ — แต่ใส่ปลอกขั้นต่ำ (A_v,min, s ≤ s_max) ตามแนวปฏิบัติ "
+             "เพื่อยึดเหล็กยืนและกันการวิบัติเฉือนแบบเปราะ" if sr.s > 0
         else "∴ ไม่บังคับเหล็กปลอกขั้นต่ำตามการคำนวณ")
     D.eq(rf"\rho_w = \frac{{A_s}}{{b_w\,d}} = \frac{{{_n(v['rho_w'] * bw * d, 0)}}}"
          rf"{{{bw:.0f}{X}{_n(d, 1)}}} = {v['rho_w']:.5f}", ref="ACI 22.5.5.1")
@@ -374,10 +376,10 @@ def _shear(D, inp, sr):
         D.eq(rf"V_s = \frac{{A_v\,f_{{yt}}\,d}}{{s}} = \frac{{{_n(sr.Av, 1)}{X}{_n(fyt)}{X}"
              rf"{_n(d, 1)}}}{{{sr.s:.0f}}}{X}10^{{-3}} = {_n(sr.Vs / 1e3, 1)}\ \mathrm{{kN}}",
              ref="ACI 22.5.8.5.3")
-        if sr.min_required:
+        if sr.s > 0:
             D.eq(rf"\frac{{A_v}}{{s}} = \frac{{{_n(sr.Av, 1)}}}{{{sr.s:.0f}}} = "
                  rf"{sr.Av / sr.s:.4f}\ {_ge(sr.av_min_ok)}\ \frac{{A_{{v,\min}}}}{{s}} = "
-                 rf"{sr.Av_min_s:.4f}", ref="ACI 9.6.3.1", check=sr.av_min_ok)
+                 rf"{sr.Av_min_s:.4f}", ref="ACI 9.6.3.1, Table 9.6.3.4", check=sr.Av / sr.s >= sr.Av_min_s - 1e-12)
         D.eq(rf"s = {sr.s:.0f}\ \mathrm{{mm}}\ {_le(sr.spacing_ok)}\ s_{{\max}} = "
              rf"{sr.s_max:.0f}\ \mathrm{{mm}}", ref="ACI Table 9.7.6.2.2",
              check=sr.spacing_ok)

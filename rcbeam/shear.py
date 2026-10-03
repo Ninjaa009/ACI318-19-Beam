@@ -111,11 +111,15 @@ def check_stirrups(Vu, fc, fyt, bw, d, As, ds, legs, s, lam=1.0,
 
 
 def design_stirrups(Vu, fc, fyt, bw, d, As, ds, legs, lam=1.0,
-                    exempt_9631=False, vc_simple="a", step=25.0):
-    """เลือกระยะปลอก (ปัดลงทีละ step mm)"""
+                    exempt_9631=False, vc_simple="a", step=25.0, always_min=True):
+    """เลือกระยะปลอก (ปัดลงทีละ step mm)
+
+    always_min=True (ค่าเริ่มต้น): ใส่ปลอกอย่างน้อยเท่า Av,min และ s ≤ s_max เสมอ แม้ ACI ไม่บังคับ
+    (Vu ≤ 0.083φλ√f′c·bw·d) — ยึดเหล็กยืน และกันการวิบัติเฉือนแบบเปราะ; False = ไม่ใส่ถ้าไม่บังคับ
+    """
     no = check_stirrups(Vu, fc, fyt, bw, d, As, ds, legs, 0.0, lam,
                         exempt_9631, vc_simple)
-    if not no.min_required and no.strength_ok:
+    if not no.min_required and no.strength_ok and not always_min:
         no.notes.append("ไม่ต้องใช้ปลอกตามการคำนวณ (Vc จากสมการ (c)) "
                         "แต่ในทางปฏิบัติควรใส่ปลอกขั้นต่ำ")
         return no
@@ -132,6 +136,9 @@ def design_stirrups(Vu, fc, fyt, bw, d, As, ds, legs, lam=1.0,
         s = step
     r = check_stirrups(Vu, fc, fyt, bw, d, As, ds, legs, s, lam, exempt_9631,
                        vc_simple)
+    if not no.min_required:
+        r.notes.append("ACI ไม่บังคับปลอก (Vu ≤ 0.083φλ√f′c·bw·d) — ใส่ปลอกขั้นต่ำ Av,min @ s ≤ s_max "
+                       "ตามแนวปฏิบัติ (ยึดเหล็กยืน, กันวิบัติเฉือนแบบเปราะ)")
     if s < 75.0:
         r.notes.append("ระยะปลอกถี่มาก → พิจารณาเพิ่มขนาด/จำนวนขาปลอกหรือหน้าตัด")
     return r

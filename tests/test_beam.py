@@ -135,3 +135,12 @@ def test_calsheet_a4_html():
     assert "<svg" in html and "346.95" in html          # φMn อยู่ใน alt ของสมการ
     assert 'font-family: "THSarabunPSK"' in html          # ฝังฟอนต์ในไฟล์
     assert "data:image/svg+xml;base64" in html            # สมการ LaTeX
+
+
+def test_minimum_stirrups_even_when_concrete_suffices():
+    """Vu ≤ 0.083φλ√f′c·bw·d: ACI ไม่บังคับ แต่แอปใส่ Av,min @ s ≤ d/2 เสมอ (always_min)"""
+    r = design_stirrups(29.6e3, 27.46, 240, 300, 438.5, 982, 9, 2)
+    assert not r.min_required and r.ok
+    assert r.s == 200 and r.Av / r.s >= r.Av_min_s and r.vc_eq == "a"
+    r0 = design_stirrups(29.6e3, 27.46, 240, 300, 438.5, 982, 9, 2, always_min=False)
+    assert r0.s == 0 and r0.vc_eq == "c"
