@@ -482,18 +482,17 @@ def slenderness(sec, axis, lu, Pu, M_top, M_bot, k=1.0, V=None, L=None, curvatur
 STAAD_AXIS = {"x": "z", "y": "y"}
 
 
-def from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e, flip_axial=False):
+def from_staad(fx_s, fy_s, fz_s, my_s, mz_s, my_e, mz_e):
     """แปลง member end forces ของ STAAD (แกน local, ค่าที่ start และ end node) เป็นแรงของสกิล
 
     YD/ZD ของหน้าตัดกับแรงในตาราง member end forces อยู่ในแกน local ชุดเดียวกัน จึงจับคู่ตรง
     ไม่ขึ้นกับ beta angle: Mz (ดัดรอบ local z ใช้ความลึก YD = h) → Mx ภายใน, Fy → Vuy;
     My (ใช้ความลึก ZD = b) → My, Fz → Vux  (beta มีผลเฉพาะการจับคู่ทิศการเซของชั้น — incoming/sway.py)
-    P = Fx ที่ start node (ใน member end forces ของ STAAD ค่าบวกที่ start = แรงอัด) —
-    flip_axial กลับเครื่องหมายถ้าข้อมูลมาจากแหล่งที่ใช้ convention ต่างกัน
+    P = Fx ที่ start node (ใน member end forces ของ STAAD ค่าบวกที่ start = แรงอัด)
     โมเมนต์ใช้ขนาด (หน้าตัดเหล็กสมมาตร) ทิศการดัดตัดสินภายหลังจากสมดุลแรงเฉือน
     คืน dict: Pu, Mxt, Mxb, Myt, Myb, Vuy, Vux (หน่วยเดียวกับที่ป้อน)
     """
-    return {"Pu": -fx_s if flip_axial else fx_s,
+    return {"Pu": fx_s,
             "Mxt": abs(mz_e), "Mxb": abs(mz_s), "Myt": abs(my_e), "Myb": abs(my_s),
             "Vuy": abs(fy_s), "Vux": abs(fz_s)}
 
@@ -561,109 +560,6 @@ def parse_staad_end_forces(text):
             elif mu is None and t in mlo:
                 mu = mlo[t]
     return rows, fu, mu
-
-
-def guess_start_node(rows):
-    """เดา start node ของ member: ที่ start node ของ STAAD Fx บวก = อัด ส่วน end node กลับเครื่องหมาย
-    เสาที่รับแรงอัดเป็นหลักจึงมี Fx > 0 ที่ start node เกือบทุก L/C → เลือก node ที่ Fx > 0 บ่อยที่สุด
-    คืน (node, มั่นใจหรือไม่) — ไม่มั่นใจเมื่อคะแนนเท่ากัน (ให้ผู้ใช้เลือกเอง)
-    """
-    score = {}
-    for r in rows:
-        score[r["node"]] = score.get(r["node"], 0) + (1 if r["fx"] > 0 else -1)
-    if not score:
-        return None, False
-    ranked = sorted(score.items(), key=lambda kv: -kv[1])
-    sure = len(ranked) == 2 and ranked[0][1] > ranked[1][1]
-    return ranked[0][0], sure
-
-
-def pair_staad_rows(rows, start_node, flip_axial=False):
-    """จับคู่แถว start/end ของแต่ละ L/C (member เดียว) แล้วแปลงด้วย from_staad
-    คืน (list ของ (lc, forces), ข้อความผิดพลาด) — L/C ที่ไม่มีครบ 2 node ถูกตัดออกพร้อมแจ้ง
-    """
-    by_lc, order, errs = {}, [], []
-    for r in rows:
-        if r["lc"] not in by_lc:
-            by_lc[r["lc"]] = {}
-            order.append(r["lc"])
-        by_lc[r["lc"]][r["node"]] = r
-    out = []
-    for lc in order:
-        d = by_lc[lc]
-        if start_node not in d or len(d) != 2:
-            errs.append(f"L/C {lc}: ต้องมี 2 แถว (start node {start_node} และ end node) — พบ node "
-                        f"{', '.join(d)}")
-            continue
-        s = d[start_node]
-        e = next(v for k, v in d.items() if k != start_node)
-        out.append((lc, from_staad(s["fx"], s["fy"], s["fz"], s["my"], s["mz"], e["my"], e["mz"],
-                                   flip_axial)))
-    return out, errs
-
-
-# คู่หน่วยที่ STAAD ใช้บ่อย (แรง, โมเมนต์) — ใช้เดาหน่วยเมื่อคัดลอกมาไม่มีหัวตาราง
-STAAD_UNIT_PAIRS = [("kN", "kN-m"), ("kg", "kN-m"), ("kg", "kg-m"), ("ton", "ton-m"), ("ton", "kN-m"),
-                    ("kN", "kg-m"), ("N", "N-m"), ("N", "N-mm"), ("N", "kN-m")]
-
-
-def staad_units_from_statics(pairs, L):
-    """หาคู่หน่วย (แรง, โมเมนต์) ที่ทำให้สมดุลของเสาเป็นจริงทุก L/C: |F|·L ≈ |Mt| ± |Mb|
-
-    pairs: ผลจาก pair_staad_rows (ค่าดิบตามตาราง), L: ความยาวชิ้นส่วน (mm)
-    สมดุลบอกได้แค่ "อัตราส่วน" หน่วยแรงต่อหน่วยโมเมนต์ (เช่น kg กับ kN-m ไม่เข้ากันกับ kN กับ kN-m)
-    แต่แยก kN/kN-m กับ kg/kg-m ไม่ได้ → ถ้าได้หลายคู่ ผู้ใช้ต้องเลือกเอง
-    คืน list ของคู่หน่วยที่ผ่าน (ว่าง = ไม่มีคู่ไหนผ่าน: ตรวจ L หรือมีแรงกระทำกลางเสา)
-    """
-    return [(fu, mu) for fu, mu in STAAD_UNIT_PAIRS if not staad_statics_errors(pairs, fu, mu, L)]
-
-
-def staad_statics_errors(pairs, fu, mu, L):
-    """L/C ที่สมดุล |F|·L ≈ |Mt| ± |Mb| ไม่เป็นจริงเมื่อใช้หน่วย (fu, mu) และความยาว L (mm)
-    ข้ามแกนที่โมเมนต์ < 5% ของค่าสูงสุดในชุดข้อมูล — คืน list ของ (L/C, แกน, |F| kN, (|Mt|+|Mb|)/L kN)
-    """
-    kf, km = STAAD_FORCE_UNITS[fu], STAAD_MOMENT_UNITS[mu]
-    axes = [(lc, ax, Mt, Mb, V) for lc, f in pairs
-            for ax, Mt, Mb, V in (("Mz/Fy", f["Mxt"], f["Mxb"], f["Vuy"]), ("My/Fz", f["Myt"], f["Myb"], f["Vux"]))]
-    big = max((Mt + Mb for *_, Mt, Mb, V in axes), default=0.0)
-    if big <= 0:
-        return []
-    bad = []
-    for lc, ax, Mt, Mb, V in axes:
-            if Mt + Mb >= 0.05 * big:          # ข้ามแกนที่โมเมนต์เล็กมากเทียบกับข้อมูลชุดนี้ (เศษตัวเลข)
-                try:
-                    curvature_ratio(Mt * km, Mb * km, V=V * kf, L=L)
-                except ValueError:
-                    bad.append((lc, ax, V * kf / 1e3, (Mt + Mb) * km / L / 1e3))
-    return bad
-
-
-def staad_member_length(pairs, fu, mu, tol=CURV_TOL):
-    """ความยาวเสา (mm) ที่ทำให้ |F|·L = |Mt| + |Mb| (โค้งสองทาง ซึ่งเป็นกรณีปกติของเสาในโครงข้อแข็ง)
-    ตรงกันทุก L/C เมื่อใช้หน่วย (fu, mu) — ใช้แนะนำผู้ใช้เมื่อ L หรือหน่วยไม่เข้ากับข้อมูล
-    แต่ละ L/C ใช้แกนที่โมเมนต์ใหญ่กว่า คืน L (mm) หรือ None ถ้าไม่ตรงกันทุก L/C
-    """
-    kf, km = STAAD_FORCE_UNITS[fu], STAAD_MOMENT_UNITS[mu]
-    Ls = []
-    for _, f in pairs:
-        Mt, Mb, V = max(((f["Mxt"], f["Mxb"], f["Vuy"]), (f["Myt"], f["Myb"], f["Vux"])),
-                        key=lambda t: t[0] + t[1])
-        if V > 0 and Mt + Mb > 0:
-            Ls.append((Mt + Mb) * km / (V * kf))
-    if not Ls:
-        return None
-    Lm = sorted(Ls)[len(Ls) // 2]
-    return Lm if all(abs(x - Lm) <= tol * Lm for x in Ls) else None
-
-
-def staad_suggest(pairs, L_range=(1500.0, 15000.0)):
-    """คู่หน่วยที่ทำให้เสามีความยาวสมจริง (โค้งสองทาง) → list ของ (fu, mu, L_mm) ใช้เป็นคำแนะนำ"""
-    out = []
-    for fu, mu in STAAD_UNIT_PAIRS:
-        Ls = staad_member_length(pairs, fu, mu)
-        if Ls and L_range[0] <= Ls <= L_range[1]:
-            out.append((fu, mu, Ls))
-    return out
 
 
 def check_axial_sign(rows):

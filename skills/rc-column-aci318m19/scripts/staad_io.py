@@ -201,12 +201,6 @@ def _logical_lines(text):
     return out
 
 
-_HEADS = ("JOINT COORD", "MEMBER INCI", "MEMBER PROP", "CONSTANT", "SUPPORT", "DEFINE MATERIAL",
-          "END DEFINE", "LOAD", "PERFORM", "FINISH", "UNIT", "PRINT", "START ", "END JOB", "STAAD",
-          "INPUT", "SET ", "MEMBER RELEASE", "MEMBER TRUSS", "MEMBER OFFSET", "ELEMENT", "SPRING",
-          "DEFINE", "CHANGE", "PARAMETER", "CHECK", "SELECT", "LOAD LIST", "ANALYSIS")
-
-
 def _is_number(t):
     try:
         float(t)
@@ -424,7 +418,6 @@ def applied_totals(text):
 class Forces:
     data: dict = field(default_factory=dict)   # (member, load) -> {joint: (fx, fy, fz, mx, my, mz)} N, N·mm
     units: list = field(default_factory=list)  # หัวตารางหน่วยที่พบ เช่น "KN METE"
-    tables: int = 0
 
     def members(self):
         return sorted({m for m, _ in self.data})
@@ -464,7 +457,6 @@ def parse_anl(text):
             continue
         if "MEMBER END FORCES" in U:
             on, member, load = True, None, None
-            out.tables += 1
             if pending:
                 uf, ul = pending[0], pending[1]
             continue
@@ -517,7 +509,6 @@ def forces_from_table(text, parse_table, force_units, moment_units, fu=None, mu=
         out.data.setdefault((m, lc), {})[j] = (r["fx"] * kf, r["fy"] * kf, r["fz"] * kf,
                                                 r["mx"] * km, r["my"] * km, r["mz"] * km)
     out.units = [f"{fu}, {mu}"]
-    out.tables = 1
     return out
 
 

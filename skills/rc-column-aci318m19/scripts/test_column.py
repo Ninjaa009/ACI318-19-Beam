@@ -210,8 +210,6 @@ def run():
                (f["Pu"], f["Mxt"], f["Mxb"], f["Vuy"], f["Myt"], f["Myb"], f["Vux"])
                == (1600, 90, 60, 6, 30, 20, 10))
     check_true("C11", "ชื่อแกน STAAD: x ภายใน = z, y = y", C.STAAD_AXIS == {"x": "z", "y": "y"})
-    check_true("C11", "flip_axial กลับเครื่องหมาย P", C.from_staad(1600, 0, 0, 0, 0, 0, 0,
-                                                                     flip_axial=True)["Pu"] == -1600)
     ok, m = C.check_axial_sign([("1.2D+1.6L", -1500e3, True), ("W", 300e3, False)])
     check_true("C11", "combo แนวดิ่งได้แรงดึง → หยุด (เครื่องหมาย P กลับด้าน)", (not ok) and "กลับด้าน" in m[0])
     ok, m = C.check_axial_sign([("1.2D+1.6L", 1500e3, True), ("0.9D+W", -50e3, False)])
@@ -237,31 +235,21 @@ def run():
            "12\t2\t12\t1619.806\t277.428\t-235.279\t-0.004\t2.610\t2.996\n")
     rows, fu, mu = C.parse_staad_end_forces(txt)
     check_true("C12", "อ่าน 4 แถว + หน่วยจากหัวตาราง (kg, kN-m)", (len(rows), fu, mu) == (4, "kg", "kN-m"))
-    node, sure = C.guess_start_node(rows)
-    check_true("C12", "เดา start node = 12 (Fx > 0 = อัด)", node == "12" and sure)
-    pairs, errs = C.pair_staad_rows(rows, "12")
-    f = dict(pairs)["102"]
-    check_true("C12", "L/C 102: P = Fx(node 12), Mz 20.958/9.624, My 17.505/8.359",
-               not errs and (f["Pu"], f["Mxt"], f["Mxb"], f["Myt"], f["Myb"], f["Vuy"], f["Vux"])
-               == (7764.665, 20.958, 9.624, 17.505, 8.359, 890.992, 753.547))
+    r12 = {(r["lc"], r["node"]): r for r in rows}
+    check_true("C12", "L/C 102 node 12: Fx 7764.665 kg, Mz 9.624, My 8.359 kN·m",
+               (r12[("102", "12")]["fx"], r12[("102", "12")]["mz"], r12[("102", "12")]["my"])
+               == (7764.665, 9.624, 8.359))
     Fy = 890.992 * C.STAAD_FORCE_UNITS["kg"]                 # N
     r, _ = C.curvature_ratio(20.958e6, 9.624e6, V=Fy, L=3500)
     check_true("C12", "หน่วยผสม kg / kN-m แปลงแล้วสมดุลได้ (โค้งสองทาง, L = 3.5 m)", r > 0)
-    rows2, _, _ = C.parse_staad_end_forces("12 101 24 -4601.253 -686.815 580.044 0.005 13.475 16.155")
-    _, errs = C.pair_staad_rows(rows2, "12")
-    check_true("C12", "L/C ที่มีแถวเดียว → แจ้งผิดพลาด", len(errs) == 1)
-    check_true("C12", "ไม่มีหัวตาราง: เดาหน่วยจากสมดุล (L = 3.5 m) → kg + kN-m",
-               C.staad_units_from_statics(pairs, 3500) == [("kg", "kN-m")])
-    check_true("C12", "L ผิด (5 m) → ไม่มีคู่หน่วยที่เข้ากัน", C.staad_units_from_statics(pairs, 5000) == [])
-    sug = C.staad_suggest(pairs)
-    check_true("C12", "แนะนำ: kg + kN-m → เสายาว 3.50 m (โค้งสองทาง)",
-               any(a == "kg" and b == "kN-m" and abs(c - 3500) < 5 for a, b, c in sug))
-    check_true("C12", "เลือก kg + kg-m (ผิด) → สมดุลต้องการเสายาวแค่ 34 mm และทุก L/C ไม่ผ่าน",
-               abs(C.staad_member_length(pairs, "kg", "kg-m") - 34.3) < 0.5
-               and len(C.staad_statics_errors(pairs, "kg", "kg-m", 3500)) >= 2)
-    r1, _, _ = C.parse_staad_end_forces("1 101 1 1600 -6 10 0 -20 60\n1 101 2 -1600 6 -10 0 -30 -90")
-    g1 = C.staad_units_from_statics(C.pair_staad_rows(r1, "1")[0], 5000)
-    check_true("C12", "kN/kN-m แยกจาก kg/kg-m ด้วยสมดุลไม่ได้ → ให้ผู้ใช้เลือก", ("kN", "kN-m") in g1 and len(g1) > 1)
+    grp, fu2, mu2 = C.parse_staad_end_forces("Beam\tL/C\tNode\tAxial Force kg\tShear-Y kg\tShear-Z kg\t"
+                                             "Torsion kN-m\tMoment-Y kN-m\tMoment-Z kN-m\n"
+                                             "1\t1\t1\t 3379.927\t-213.153\t 179.037\t 0.000\t-1.986\t-2.303\n"
+                                             "\t\t13\t-1666.803\t 213.153\t-179.037\t-0.000\t-4.159\t-5.014\n"
+                                             "\t2\t1\t 1619.806\t-277.428\t 235.279\t-0.004\t-2.610\t-2.996\n")
+    check_true("C12", "ตารางแบบกลุ่ม (Beam / L/C เว้นว่าง) เติมจากแถวบน + หน่วยในหัวคอลัมน์",
+               [(r["beam"], r["lc"], r["node"]) for r in grp] == [("1", "1", "1"), ("1", "1", "13"), ("1", "2", "1")]
+               and (fu2, mu2) == ("kg", "kN-m"))
     rows3, _, _ = C.parse_staad_end_forces("5   101 1.2D+1.6L   3   100   1   2   0   3   4")
     check_true("C12", "L/C มีชื่อต่อท้าย", rows3 and rows3[0]["lc"] == "101 1.2D+1.6L" and rows3[0]["node"] == "3")
 

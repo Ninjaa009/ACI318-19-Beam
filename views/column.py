@@ -27,7 +27,7 @@ SM, SF = st.session_state.get("staad_model"), st.session_state.get("staad_forces
 SRC = (["model"] if SM is not None and SF is not None else []) + ["manual"]
 src = st.radio("แหล่งข้อมูล", SRC, horizontal=True, key=f"c_src_{len(SRC)}",
                format_func=lambda x: {"model": "โมเดล STAAD (.std + .anl) — ขั้นที่ 1–2",
-                                      "manual": "วางตาราง / ป้อนเอง"}[x])
+                                      "manual": "ป้อน Mz / My เอง"}[x])
 sel = None
 for _k, _v in (("c_h", 0.40), ("c_b", 0.40), ("c_L", 5.0), ("c_lux", 4.5), ("c_luy", 4.5)):
     st.session_state.setdefault(_k, _v)
@@ -134,16 +134,6 @@ fM = lambda x: x / M  # noqa: E731
 num = lambda lab: st.column_config.NumberColumn(lab, format="%.2f")  # noqa: E731
 
 
-STAAD_SAMPLE = """Beam\tL/C\tNode\tAxial Force\tShear-Y\tShear-Z\tTorsion\tMoment-Y\tMoment-Z
-\t\t\tkN\tkN\tkN\tkN-m\tkN-m\tkN-m
-1\t101\t1\t1600.000\t-6.000\t10.000\t0.000\t-20.000\t60.000
-1\t101\t2\t-1600.000\t6.000\t-10.000\t0.000\t-30.000\t-90.000
-1\t102\t1\t900.000\t15.000\t3.000\t0.000\t5.000\t-35.000
-1\t102\t2\t-900.000\t-15.000\t-3.000\t0.000\t10.000\t40.000
-1\t103\t1\t1800.000\t2.800\t1.400\t0.000\t3.000\t8.000
-1\t103\t2\t-1800.000\t-2.800\t-1.400\t0.000\t4.000\t6.000"""
-
-
 def val(x, d=0.0):
     try:
         x = float(x)
@@ -156,10 +146,7 @@ def val(x, d=0.0):
 st.info("ออกแบบเป็น **เสาในโครง non-sway** — ผู้ออกแบบต้องยืนยันเองว่าโครงไม่เซ (Q ≤ 0.05 ตาม ACI 6.6.4.3 "
         "หรือมีผนังรับแรงเฉือน/โครงค้ำยัน) · 🚧 **Incoming:** ระบบตรวจ sway / non-sway และการออกแบบเสา sway")
 st.header("ข้อมูลแรง")
-mode = "model" if src == "model" else st.radio("รูปแบบข้อมูลแรง", ["staad", "app"], horizontal=True, key="c_mode",
-                format_func=lambda x: {"staad": "STAAD.Pro member end forces (แนะนำ)",
-                                       "app": "ป้อน Mz / My เอง"}[x])
-units_ok = True
+mode = "model" if src == "model" else "app"
 if mode == "model":
     strength = SM.strength_combos()
     avail = [lc for lc in SF.loads() if (sel, lc) in SF.data]
@@ -186,105 +173,6 @@ if mode == "model":
                                        for n, f, *_ in rows_in]), hide_index=True, width="stretch")
     else:
         st.warning("ยังไม่ได้เลือก combo")
-elif mode == "staad":
-    st.markdown("**วิธีใช้:** ใน STAAD เปิดตาราง **Beam End Force** → เลือกแถวของเสาต้นนี้ "
-                "(ทุก L/C ทั้ง 2 node) → **Ctrl+C** → วางทับในช่องข้างล่าง (**Ctrl+V**) "
-                "ไม่ต้องแก้เครื่องหมายหรือหน่วย ถ้าคัดลอกหัวตารางมาด้วย แอปจะอ่านหน่วยให้เอง")
-    txt = st.text_area("ตาราง Beam End Force จาก STAAD (Beam, L/C, Node, Axial, Shear-Y, Shear-Z, "
-                       "Torsion, Moment-Y, Moment-Z)", STAAD_SAMPLE, height=230, key="c_staad_txt")
-    srows, fu_d, mu_d = C.parse_staad_end_forces(txt)
-    FU, MU = list(C.STAAD_FORCE_UNITS), list(C.STAAD_MOMENT_UNITS)
-    if not srows:
-        st.error("อ่านข้อมูลไม่ได้ — ต้องมี 9 คอลัมน์: Beam, L/C, Node, Axial, Shear-Y, Shear-Z, "
-                 "Torsion, Moment-Y, Moment-Z")
-    c1, c2, c3 = st.columns(3)
-    beams = list(dict.fromkeys(r["beam"] for r in srows))
-    if len(beams) > 1:
-        bsel = c1.selectbox("Beam (เสา)", beams, key="c_sbeam")
-        srows = [r for r in srows if r["beam"] == bsel]
-    nodes = list(dict.fromkeys(r["node"] for r in srows))
-    guess, sure = C.guess_start_node(srows)
-    snode = None
-    if nodes:
-        snode = c2.selectbox("start node", nodes, nodes.index(guess) if guess in nodes else 0,
-                             key=f"c_snode_{'_'.join(nodes)}",
-                             help="แถวของ start node ใช้ Fx เป็น P (บวก = อัด) — แอปเดาจาก node ที่ Fx > 0")
-        if not sure:
-            st.warning("เดา start node ไม่ได้ชัด — ตรวจใน STAAD (Member Info / Incidences) แล้วเลือกเอง")
-    flip = c3.checkbox("กลับเครื่องหมาย P (ข้อมูลใช้ ลบ = อัด)", key="c_flip")
-    lcs = list(dict.fromkeys(r["lc"] for r in srows))
-    c1, c2 = st.columns(2)
-    use = c1.multiselect("L/C ที่ใช้ออกแบบ (ควรเป็น combination ที่คูณ factor แล้ว)", lcs, lcs,
-                         key=f"c_suse_{len(lcs)}")
-    grav = c2.multiselect("L/C ที่มีแต่แรงแนวดิ่ง (D, L) — ใช้ตรวจเครื่องหมาย P", lcs,
-                          key=f"c_sgrav_{len(lcs)}")
-    pairs, perrs = C.pair_staad_rows([r for r in srows if r["lc"] in use], snode, flip)
-    for m in perrs:
-        st.error(m)
-    # หน่วย: อ่านจากหัวตาราง > ปุ่มแนะนำ > เดาจากสมดุล |F|·L = |Mt| ± |Mb| > ให้ผู้ใช้เลือก
-    fits = C.staad_units_from_statics(pairs, L) if pairs else []
-    pick = st.session_state.get("c_upick")
-    pick = pick[:2] if pick and pick[2] == hash(txt) else None      # ใช้เฉพาะกับข้อมูลชุดเดิม
-    if fu_d and mu_d:
-        dfu, dmu, how = fu_d, mu_d, "อ่านจากหัวตาราง"
-    elif pick:
-        (dfu, dmu), how = pick, "ตามที่เลือกจากคำแนะนำ"
-    elif len(fits) == 1:
-        (dfu, dmu), how = fits[0], f"เดาจากสมดุลแรงเฉือน–โมเมนต์ (L = {L / 1e3:.2f} m)"
-    else:
-        dfu = dmu = None
-        how = ""
-    c1, c2 = st.columns(2)
-    sfu = c1.selectbox("หน่วยแรง (Axial / Shear)", FU, FU.index(dfu) if dfu else None,
-                       key=f"c_sfu_{dfu}", placeholder="เลือกหน่วยแรง", help="kg ใน STAAD = kgf")
-    smu = c2.selectbox("หน่วยโมเมนต์", MU, MU.index(dmu) if dmu else None, key=f"c_smu_{dmu}",
-                       placeholder="เลือกหน่วยโมเมนต์")
-    if how:
-        st.caption(f"หน่วย{how}: แรง **{dfu}**, โมเมนต์ **{dmu}** — ตรวจให้ตรงกับหัวตาราง STAAD")
-    elif srows:
-        st.warning("ไม่พบหน่วยในข้อมูลที่วาง — เลือกหน่วยให้ตรงกับหัวตาราง STAAD (หน่วยผิด = ผลผิดหลายสิบเท่า)")
-    units_ok = bool(sfu and smu)
-    # ด่านตรวจสมดุล: หน่วยหรือความยาวเสาผิด → หยุดที่นี่ที่เดียว พร้อมคำแนะนำ
-    if units_ok and pairs:
-        bad = C.staad_statics_errors(pairs, sfu, smu, L)
-        if bad:
-            units_ok = False
-            Lneed = C.staad_member_length(pairs, sfu, smu)
-            st.error(f"**ข้อมูลไม่สมดุล** เมื่อใช้หน่วย {sfu} + {smu} และเสายาว {L / 1e3:.2f} m: "
-                     f"แรงเฉือน × ความยาว ไม่เท่ากับโมเมนต์หัว+ตีนเสา ({len(bad)} รายการ) "
-                     "→ หน่วยหรือความยาวเสา (แถบข้าง: ความยาวชิ้นส่วน c/c) ไม่ตรงกับโมเดล"
-                     + (f" · ถ้าหน่วยนี้ถูก เสาต้องยาว {Lneed / 1e3:.3f} m" if Lneed else ""))
-            with st.expander("ดูรายการที่ไม่สมดุล"):
-                st.dataframe(pd.DataFrame(bad, columns=["L/C", "แกน", "|F| (kN)", "(|Mt|+|Mb|)/L (kN)"]),
-                             hide_index=True)
-            sug = C.staad_suggest(pairs)
-            if sug:
-                st.markdown("**ค่าที่ทำให้ข้อมูลสมดุล (เสาดัดโค้งสองทาง)** — กดเพื่อใช้ หรือแก้เองในแถบข้าง:")
-
-                def _apply(fu_, mu_, L_):
-                    st.session_state["c_upick"] = (fu_, mu_, hash(txt))
-                    st.session_state["c_L"] = round(L_ / 1e3, 2)
-                for fu_, mu_, L_ in sug:
-                    st.button(f"ใช้หน่วย {fu_} + {mu_} และความยาวเสา {L_ / 1e3:.2f} m", key=f"c_sug_{fu_}_{mu_}",
-                              on_click=_apply, args=(fu_, mu_, L_))
-            else:
-                st.info("หาหน่วย/ความยาวที่สมดุลไม่ได้ — อาจมีแรงกระทำกลางเสา หรือเลือก start node / beam ผิด")
-    rows_in = []
-    if units_ok:
-        kF, kM = C.STAAD_FORCE_UNITS[sfu] / F, C.STAAD_MOMENT_UNITS[smu] / M   # → หน่วยที่แอปแสดง
-        for lc, f in pairs:
-            f = {k: v * (kM if k[0] == "M" else kF) for k, v in f.items()}
-            rows_in.append((lc, f, lc in grav, "auto", "auto"))
-    st.caption("Mz คู่กับ Shear-Y ใช้ความลึก YD · My คู่กับ Shear-Z ใช้ความลึก ZD (แกน local เดียวกัน "
-               "ไม่ขึ้นกับ beta) · โมเมนต์ใช้ขนาด ทิศการดัดตัดสินจาก |F|·L")
-    if rows_in:
-        with st.expander(f"ค่าที่ใช้คำนวณ (แปลงเป็น {fu}, {mu} แล้ว)", expanded=True):
-            st.dataframe(pd.DataFrame([{"L/C": n, f"P = Fx start ({fu})": f["Pu"],
-                                        f"|Mz| end ({mu})": f["Mxt"], f"|Mz| start ({mu})": f["Mxb"],
-                                        f"|My| end ({mu})": f["Myt"], f"|My| start ({mu})": f["Myb"],
-                                        f"|Fy| ({fu})": f["Vuy"], f"|Fz| ({fu})": f["Vux"]}
-                                       for n, f, *_ in rows_in]),
-                         hide_index=True, width="stretch")
 else:
     st.caption("ชื่อแกนตาม STAAD · Mz ดัดรอบแกน z (ความลึก YD) คู่กับ Fy · My ดัดรอบแกน y (ความลึก ZD) "
                "คู่กับ Fz · P > 0 = อัด · ทิศการดัด auto = ตัดสินจาก |F|·L")
@@ -318,13 +206,13 @@ else:
 sign_ok, sign_msgs = C.check_axial_sign([(n, f["Pu"], g) for n, f, g, *_ in rows_in])
 for m in sign_msgs:
     (st.warning if sign_ok else st.error)(m)
-ready = sign_ok and units_ok
+ready = sign_ok
 
 if st.button("ตรวจสอบเสา", type="primary", disabled=not ready,
-             help=None if ready else "ต้องตรวจเครื่องหมาย P และเลือกหน่วยก่อน"):
+             help=None if ready else "ต้องตรวจเครื่องหมาย P ก่อน"):
     st.session_state.col_go = True
 if not ready:
-    st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อเครื่องหมาย P ถูกต้องและเลือกหน่วยแล้ว")
+    st.info("ปุ่ม **ตรวจสอบเสา** จะใช้ได้เมื่อเครื่องหมาย P ถูกต้อง")
     st.stop()
 if not st.session_state.get("col_go"):
     st.info("กรอกข้อมูลแล้วกด **ตรวจสอบเสา**" + ("" if src == "model" else
