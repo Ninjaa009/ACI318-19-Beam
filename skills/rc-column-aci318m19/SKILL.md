@@ -78,6 +78,10 @@ description: ออกแบบและตรวจสอบเสา คสล
   `forces_from_table(text, parse_staad_end_forces, STAAD_FORCE_UNITS, STAAD_MOMENT_UNITS)` อ่านตาราง Beam End Force
   ที่คัดลอกจากหน้าจอ STAAD ทั้งตาราง (Beam / L/C เว้นว่างในแถวต่อมา — เติมจากแถวบน; หน่วยจากหัวตาราง ต้องมี) เป็น Forces
   แบบเดียวกับ .anl; `base_reactions(model, forces, load)` รวมแรงอัดที่ฐานเสาทุกต้นเทียบน้ำหนักรวม (ตรวจว่าแรงครบ/หน่วยถูก);
+  สำหรับคาน (ใช้ในแอป): `parse_anl_member_loads(anl)` อ่านรายการ MEMBER LOAD ใน .anl (CON ยืนยันกับไฟล์จริง; UDL ยังไม่ยืนยัน),
+  `beam_diagram(model, forces, member, load, anl_loads)` → M(x) (บวก = ดึงล่าง = −Mz_s + Fy_s·x + Σ…) และ V(x) พร้อมตรวจปิด
+  M(L) = Mz_e, V(L) = −Fy_e (คานแนวราบ beta 0 เท่านั้น), `beam_design_values(...)` → M− ที่ผิวเสา (ครึ่งด้านเสาในแนวคาน),
+  M+ สูงสุด, Vu ที่ผิวเสา + d;
   **`PERFORM ANALYSIS PRINT ALL` อย่างเดียวไม่พิมพ์แรงใน member** — ต้องมี `PRINT MEMBER FORCES` (ยืนยันกับไฟล์จริงแล้ว)
   — ⚠️ STRENGTH FCU ใน .std เป็นกำลังลูกบาศก์ ไม่ใช่ f′c; ⚠️ รูปแบบ .anl ทดสอบกับไฟล์จำลอง (`references/staad_example/`)
   ยังต้องยืนยันกับไฟล์ .anl จริง
@@ -160,7 +164,7 @@ description: ออกแบบและตรวจสอบเสา คสล
 
 ## 10. การตรวจสอบความถูกต้อง
 
-`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 106/106** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C11 sign convention/STAAD, C12 อ่านตาราง Beam End Force (แบบกลุ่ม + หน่วยผสม), C13 อ่านไฟล์ .std/.anl + สมดุลเสาด้วย L จาก geometry + .anl จริง: สำเนา input และน้ำหนักรวมตรง STAAD + ตาราง Beam End Force จริงทุกเสา) · ระบบ sway (incoming): `python3 scripts/incoming/test_sway.py` — ผ่าน 26/26 (Q, จำแนกชั้น ตาราง RCDC, ด่าน non-sway + bypass, ทิศเซตาม beta)
+`python3 scripts/test_column.py` → `references/test-cases.md` — **ผ่าน 113/113** (C1–C4 เทียบรายงาน RCDC เสา 300×300 4-DB19.1, C5–C7 เทียบสูตรปิดที่เขียนแยก, C8 ตัวอย่างเสาชะลูด S1, C11 sign convention/STAAD, C12 อ่านตาราง Beam End Force (แบบกลุ่ม + หน่วยผสม), C13 อ่านไฟล์ .std/.anl + สมดุลเสาด้วย L จาก geometry + .anl จริง: สำเนา input และน้ำหนักรวมตรง STAAD + ตาราง Beam End Force จริงทุกเสา, C14 คาน: M/V ตลอดคานจาก .anl จริง ปิดสมดุล) · ระบบ sway (incoming): `python3 scripts/incoming/test_sway.py` — ผ่าน 26/26 (Q, จำแนกชั้น ตาราง RCDC, ด่าน non-sway + bypass, ทิศเซตาม beta)
 
 - ตรงกับ RCDC: φPn,max 1,232.14 kN; φMcap แกนเดียว 54.22 vs 54.16 kN·m; φVc 50.79/52.28 kN; φVs 107.37 kN; Q 0.011 (incoming)
 - **ยังไม่ทราบสาเหตุ:** φMcap สองแกน (มุม 33.1°) solver 54.26 vs RCDC 53.66 kN·m (RCDC ต่ำกว่า 1.1%)

@@ -153,11 +153,12 @@ def column_level(model, m):
     return round(model.joints[model.bottom_top(m)[0]][1], 1)
 
 
-def plan_figure(model, highlight=None, height=460, level=None):
+def plan_figure(model, highlight=None, height=460, level=None, pick="column", selectable=None):
     """ผังมองจากด้านบน (ลงทิศ −Y): X ไปขวา, Z ลงล่าง — หน้าตัดเสาตามขนาดจริงและทิศ YD / ZD
 
     level: ระดับตีนเสา (mm) ของชั้นที่จะแสดง (None = ชั้นล่างสุด) — คานที่แสดงคือคานที่ระดับหัวเสาชั้นนั้น
-    เสาแต่ละต้นมีจุดคลิกได้ (customdata = เลข member) สำหรับเลือกเสาด้วย st.plotly_chart(on_select=...)
+    pick = "column" | "beam": ชิ้นส่วนที่คลิกเลือกได้ (customdata = เลข member) ด้วย st.plotly_chart(on_select=...)
+    selectable: เซตเลข member ที่ให้คลิกได้ (เช่น เฉพาะที่มีแรงในผลวิเคราะห์) — None = ทั้งหมด
     """
     fig = go.Figure()
     cols = model.columns()
@@ -167,6 +168,7 @@ def plan_figure(model, highlight=None, height=460, level=None):
         level = min(column_level(model, m) for m in cols)
     here = [m for m in cols if abs(column_level(model, m) - level) < 1.0]
     tops = {round(model.joints[model.bottom_top(m)[1]][1], 1) for m in here}
+    bxs, bzs, bids = [], [], []
     for m, (a, b) in model.members.items():
         if m in set(cols):
             continue
@@ -174,9 +176,13 @@ def plan_figure(model, highlight=None, height=460, level=None):
         if abs(pa[1] - pb[1]) > 1e-6 or not any(abs(pa[1] - t) < 1.0 for t in tops):
             continue                                   # ชิ้นส่วนเอียง หรือคานคนละชั้น
         pa, pb = _m(pa), _m(pb)
-        # hoverinfo="skip": เส้นคานผ่านศูนย์กลางเสา ถ้าคลิกได้จะแย่งการคลิกเลือกเสา
-        fig.add_trace(go.Scatter(x=[pa[0], pb[0]], y=[pa[2], pb[2]], mode="lines", line=dict(color=BEAM, width=2),
+        # hoverinfo="skip": เส้นคานผ่านศูนย์กลางเสา ถ้าคลิกได้จะแย่งการคลิกเลือก (เลือกคานใช้จุดกลางคานแทน)
+        hl = pick == "beam" and m == highlight
+        fig.add_trace(go.Scatter(x=[pa[0], pb[0]], y=[pa[2], pb[2]], mode="lines",
+                                 line=dict(color=HL if hl else BEAM, width=7 if hl else 2),
                                  hoverinfo="skip", showlegend=False))
+        if selectable is None or m in selectable:
+            bxs.append((pa[0] + pb[0]) / 2); bzs.append((pa[2] + pb[2]) / 2); bids.append(m)
         fig.add_annotation(x=(pa[0] + pb[0]) / 2, y=(pa[2] + pb[2]) / 2, text=str(m), showarrow=False,
                            font=dict(color=BEAM, size=11), bgcolor="white")
     xs, zs, ids, tips = [], [], [], []
@@ -187,17 +193,25 @@ def plan_figure(model, highlight=None, height=460, level=None):
         _, yv, _ = local_axes(model, m)
         along_x = abs(yv[0]) >= abs(yv[2])            # YD ขนานแกนโลก X หรือ Z
         hx, hz = (YD / 2, ZD / 2) if along_x else (ZD / 2, YD / 2)
-        hl = m == highlight
+        hl = pick == "column" and m == highlight
         fig.add_shape(type="rect", x0=x - hx, x1=x + hx, y0=z - hz, y1=z + hz,
                       fillcolor=HL if hl else "#f5b7b1", line=dict(color=COL, width=3 if hl else 1))
         fig.add_annotation(x=x + hx, y=z - hz, text=f"<b>{m}</b>", showarrow=False, xanchor="left",
                            yanchor="bottom", font=dict(color=COL, size=13))
+        if selectable is not None and m not in selectable:
+            continue
         xs.append(x); zs.append(z); ids.append(m)
         tips.append(f"เสา {m} (คลิกเพื่อเลือก)<br>YD {YD * 1000:.0f} mm ขนาน {'X' if along_x else 'Z'}, "
                     f"ZD {ZD * 1000:.0f} mm")
-    fig.add_trace(go.Scatter(x=xs, y=zs, mode="markers", customdata=ids, hovertext=tips, hoverinfo="text",
-                             marker=dict(size=22, color=COL, opacity=0.15, symbol="square"), showlegend=False,
-                             name="เสา"))
+    if pick == "column":
+        fig.add_trace(go.Scatter(x=xs, y=zs, mode="markers", customdata=ids, hovertext=tips, hoverinfo="text",
+                                 marker=dict(size=22, color=COL, opacity=0.15, symbol="square"), showlegend=False,
+                                 name="เสา"))
+    else:
+        fig.add_trace(go.Scatter(x=bxs, y=bzs, mode="markers", customdata=bids, hoverinfo="text",
+                                 hovertext=[f"คาน {m} (คลิกเพื่อเลือก) · L {model.length(m) / 1000:.2f} m" for m in bids],
+                                 marker=dict(size=24, color=BEAM, opacity=0.15, symbol="circle"), showlegend=False,
+                                 name="คาน"))
     fig.update_layout(height=height, margin=dict(l=10, r=10, t=10, b=10), plot_bgcolor="white",
                       xaxis=dict(title="X (m)", scaleanchor="y", showgrid=False, zeroline=False),
                       yaxis=dict(title="Z (m) (ลงล่าง)", autorange="reversed", showgrid=False, zeroline=False))

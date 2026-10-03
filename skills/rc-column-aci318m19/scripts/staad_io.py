@@ -576,3 +576,188 @@ def check_equilibrium(model, forces, member, load, tol=0.02):
     scale = max(abs(s[5]), abs(e[5]), abs(s[4]), abs(e[4]), abs(e[1] * L), abs(e[2] * L), 1e3)
     err = max(abs(rz), abs(ry)) / scale
     return err <= tol, err
+
+
+# ---------------------------------------------------------------- คาน: โมเมนต์/แรงเฉือนตลอดช่วง
+_ANL_ML = re.compile(r"^\s*(\d+)\s+(-?[\d.]+(?:E[-+]?\d+)?)\s+(G?[XYZ])\s+([\d.]+)(?:\s+([\d.]+))?\s*$", re.I)
+
+
+def parse_anl_member_loads(text):
+    """รายการ MEMBER LOAD ใน .anl (STAAD พิมพ์ load ที่แปลงจาก FLOOR LOAD และ member load ของแต่ละ LOADING)
+
+    รูปแบบที่ยืนยันกับไฟล์จริงแล้ว: "  13      -0.1406 GY   0.21" (CON ขนาด P ที่ระยะ L จาก start)
+    แถวที่มีระยะ 2 ค่าถือเป็น UDL จาก L1 ถึง L2 (⚠️ ยังไม่ได้ยืนยันกับไฟล์จริง)
+    คืน {load: {member: [dict(kind, w, dir, a, b)]}} — CON: w = N, a = ระยะ (mm); UDL: w = N/mm, a–b (mm)
+    """
+    out, cur, unit, on = {}, None, None, False
+    for raw in str(text).splitlines():
+        U = raw.upper()
+        m = re.match(r"^\s*LOADING\s+(\d+)", U)
+        if m:
+            cur, on = int(m.group(1)), False
+            continue
+        m = re.search(r"MEMBER LOAD\s*-\s*UNIT\s+(\S+)\s+(\S+)", U)
+        if m and cur is not None:
+            kf, kl = _unit_key(m.group(1), FORCE), _unit_key(m.group(2), LEN)
+            unit, on = ((FORCE[kf], LEN[kl]) if kf and kl else None), bool(kf and kl)
+            continue
+        if not on:
+            continue
+        if U.lstrip().startswith(("FOR LOADING", "STATIC", "APPLIED", "LOAD COMBINATION", "*")):
+            on = False
+            continue
+        m = _ANL_ML.match(U)
+        if not m:
+            continue
+        f, l = unit
+        mem, w, d, a, b = int(m.group(1)), float(m.group(2)), m.group(3), float(m.group(4)), m.group(5)
+        it = (dict(kind="CON", w=w * f, dir=d, a=a * l, b=a * l) if b is None else
+              dict(kind="UDL", w=w * f / l, dir=d, a=a * l, b=float(b) * l))
+        out.setdefault(cur, {}).setdefault(mem, []).append(it)
+    return out
+
+
+def _is_horizontal(model, m, tol=1e-6):
+    a, b = model.members[m]
+    return abs(model.joints[a][1] - model.joints[b][1]) < tol
+
+
+def beam_primary_loads(model, member, lid, anl_loads):
+    """แรงตามขวางในแกน local y (+ ขึ้น) ของคานแนวราบ beta 0 สำหรับ primary load หนึ่ง
+    — selfweight จาก PRIS × DENSITY, member load จาก .anl (ถ้ามีรายการของคานนี้ใช้รายการนั้นแทน .std
+    เพื่อไม่นับซ้ำ) หรือจาก .std; FLOOR LOAD ต้องมีรายการใน .anl ไม่เช่นนั้น ValueError
+    คืน list ของ (kind, w, a, b) หน่วย N / N·mm⁻¹, mm
+    """
+    lc = model.loads[lid]
+    L = model.length(member)
+    out = []
+    for it in lc.items:
+        if it["type"] == "selfweight" and it["dir"] == "Y":
+            mat = model.material.get(model.mat_of.get(member, ""), {})
+            if member not in model.prism or "DENSITY" not in mat:
+                raise ValueError(f"member {member}: ไม่มีหน้าตัด PRIS หรือ DENSITY สำหรับ selfweight")
+            YD, ZD = model.prism[member]
+            out.append(("UDL", it["factor"] * YD * ZD * mat["DENSITY"], 0.0, L))
+    listed = (anl_loads or {}).get(lid, {}).get(member)
+    if listed is not None:
+        for it in listed:
+            if it["dir"] not in ("GY", "Y"):
+                raise ValueError(f"member {member} load {lid}: แรงทิศ {it['dir']} ยังไม่รองรับ")
+            out.append((it["kind"], it["w"], it["a"], it["b"]))
+        return out
+    for it in lc.items:
+        if it["type"] == "floor":
+            raise ValueError(f"LOAD {lid} มี FLOOR LOAD แต่ไม่มีรายการ MEMBER LOAD ของคาน {member} ใน .anl — "
+                             "อัปโหลดไฟล์ .anl (STAAD พิมพ์ load ที่แปลงจาก floor load ไว้ในนั้น)")
+        if it["type"] == "member" and it["member"] == member:
+            if it["dir"] not in ("GY", "Y"):
+                raise ValueError(f"member {member} load {lid}: แรงทิศ {it['dir']} ยังไม่รองรับ")
+            nums = [float(x) for x in it["rest"].split() if _is_number(x)]
+            if it["kind"] == "UNI":
+                a, b = (nums[0] * 1000, nums[1] * 1000) if len(nums) >= 2 else (0.0, L)   # ⚠️ ระยะใน .std เป็นหน่วยความยาวของไฟล์
+                out.append(("UDL", it["w"], a, b))
+            elif it["kind"] == "CON":
+                out.append(("CON", it["w"], (nums[0] * 1000 if nums else L / 2), 0.0))
+            else:
+                raise ValueError(f"member load {it['kind']} ยังไม่รองรับ")
+        elif it["type"] == "joint" or it["type"] == "selfweight":
+            continue
+    return out
+
+
+def beam_diagram(model, forces, member, load, anl_loads, n=61):
+    """โมเมนต์ (บวก = ดึงล่าง) และแรงเฉือนตลอดคาน จากแรงปลาย start + load บนคาน (คานแนวราบ beta 0)
+
+    M(x) = −Mz_s + Fy_s·x + Σ P(x − a) + Σ w·ℓ·(x − x̄)   ;   V(x) = Fy_s + Σ P + Σ w·ℓ  (ทางซ้ายของ x)
+    ตรวจปิด: M(L) ต้องเท่ากับ +Mz_e และ V(L) = −Fy_e จากตาราง → ยืนยันแกน/หน่วย/load ที่อ่านได้
+    คืน dict(x, M, V, close_M, close_V) หน่วย mm, N·mm, N
+    """
+    if not _is_horizontal(model, member):
+        raise ValueError(f"member {member} ไม่ใช่คานแนวราบ")
+    if abs(model.beta.get(member, 0.0)) > 1e-6:
+        raise ValueError(f"member {member} มี beta = {model.beta[member]:g}° — ยังไม่รองรับ")
+    a, b = model.members[member]
+    d = forces.data.get((member, load))
+    if not d or a not in d or b not in d:
+        raise KeyError(f"ไม่มีแรงของ member {member} load {load} ครบทั้ง 2 joint")
+    s, e = d[a], d[b]
+    L = model.length(member)
+    items = []
+    for p, f in model.expand(load).items():
+        items += [(k, f * w, x1, x2) for k, w, x1, x2 in beam_primary_loads(model, member, p, anl_loads)]
+    pts = sorted({i * L / (n - 1) for i in range(n)} | {it[2] for it in items if it[0] == "CON"})
+    xs, Ms, Vs = [], [], []
+    for x in pts:
+        M, V = -s[5] + s[1] * x, s[1]
+        for k, w, x1, x2 in items:
+            if k == "CON":
+                if x1 < x - 1e-9:
+                    M += w * (x - x1)
+                    V += w
+            else:
+                ln = min(max(x - x1, 0.0), x2 - x1)
+                if ln > 0:
+                    M += w * ln * (x - (x1 + ln / 2))
+                    V += w * ln
+        xs.append(x); Ms.append(M); Vs.append(V)
+    scale_M = max(max(abs(v) for v in Ms), abs(e[5]), 1e3)
+    scale_V = max(max(abs(v) for v in Vs), abs(e[1]), 1.0)
+    return dict(x=xs, M=Ms, V=Vs, close_M=abs(Ms[-1] - e[5]) / scale_M, close_V=abs(Vs[-1] + e[1]) / scale_V)
+
+
+def support_face(model, member, end):
+    """ระยะจาก joint ถึงผิวเสาที่ปลายคาน (mm) — ครึ่งหนึ่งของด้านเสาในแนวคาน; ไม่มีเสา → 0"""
+    j = model.members[member][0 if end == "start" else 1]
+    a, b = model.joints[model.members[member][0]], model.joints[model.members[member][1]]
+    along_x = abs(b[0] - a[0]) >= abs(b[2] - a[2])
+    best = 0.0
+    for c in model.columns():
+        if j in model.members[c] and c in model.prism:
+            YD, ZD = model.prism[c]
+            beta = abs(model.beta.get(c, 0.0)) % 180
+            yd_along_x = beta < 45 or beta > 135          # เสาแนวดิ่ง beta 0: YD ขนานแกนโลก X
+            dim = YD if yd_along_x == along_x else ZD
+            best = max(best, dim / 2)
+    return best
+
+
+def beam_design_values(model, forces, member, loads, anl_loads, d_eff=None, at_face=True):
+    """ค่าออกแบบของคานจาก combo กำลัง: M− ที่ผิวเสาซ้าย/ขวา, M+ สูงสุดในช่วง, Vu ที่ผิวเสา + d
+    คืน dict: rows (ต่อ combo), env (ซ้าย/กลาง/ขวา → (Mu N·mm, Vu N, combo, x)), diag (ต่อ combo), faces
+    """
+    L = model.length(member)
+    fl = support_face(model, member, "start") if at_face else 0.0
+    fr = support_face(model, member, "end") if at_face else 0.0
+    dd = d_eff or 0.0
+
+    def at(D, xq, key):
+        xs, ys = D["x"], D[key]
+        for i in range(1, len(xs)):
+            if xs[i] >= xq:
+                t = (xq - xs[i - 1]) / ((xs[i] - xs[i - 1]) or 1.0)
+                return ys[i - 1] + t * (ys[i] - ys[i - 1])
+        return ys[-1]
+
+    env = {"left": (0.0, 0.0, None, fl), "mid": (0.0, 0.0, None, L / 2), "right": (0.0, 0.0, None, L - fr)}
+    rows, diags = [], {}
+    for lc in loads:
+        D = beam_diagram(model, forces, member, lc, anl_loads)
+        diags[lc] = D
+        mL, mR = at(D, fl, "M"), at(D, L - fr, "M")
+        vL, vR = abs(at(D, min(fl + dd, L / 2), "V")), abs(at(D, max(L - fr - dd, L / 2), "V"))
+        inner = [(x, m) for x, m in zip(D["x"], D["M"]) if fl <= x <= L - fr]
+        xp, mP = max(inner, key=lambda t: t[1])
+        vP = abs(at(D, xp, "V"))
+        rows.append(dict(load=lc, M_left=mL, M_mid=mP, x_mid=xp, M_right=mR, V_left=vL, V_right=vR,
+                         close=max(D["close_M"], D["close_V"])))
+        if mL < env["left"][0]:
+            env["left"] = (mL, max(vL, env["left"][1]), lc, fl)
+        else:
+            env["left"] = (env["left"][0], max(vL, env["left"][1]), env["left"][2], fl)
+        if mR < env["right"][0]:
+            env["right"] = (mR, max(vR, env["right"][1]), lc, L - fr)
+        else:
+            env["right"] = (env["right"][0], max(vR, env["right"][1]), env["right"][2], L - fr)
+        if mP > env["mid"][0]:
+            env["mid"] = (mP, max(vP, env["mid"][1]), lc, xp)
+    return dict(rows=rows, env=env, diag=diags, faces=(fl, fr), L=L)

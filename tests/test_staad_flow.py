@@ -75,7 +75,7 @@ def test_pasted_beam_end_force_table_all_columns():
     from rcbeam.colcheck import C as CC
     M = S.parse_std(STD)
     F = S.forces_from_table(TABLE, CC.parse_staad_end_forces, CC.STAAD_FORCE_UNITS, CC.STAAD_MOMENT_UNITS)
-    assert F.members() == list(range(1, 14)) and F.loads() == [1, 2, 3, 101, 102, 103]
+    assert F.members() == list(range(1, 15)) + [17, 24] and F.loads() == [1, 2, 3, 101, 102, 103]
     assert all(S.check_equilibrium(M, F, m, lc)[0] for m in M.columns() for lc in F.loads())
     for lid, exp in ((1, 507.60), (2, 432.00), (3, 294.20), (101, 1315.44), (102, 1598.24)):
         got, n, nsup = S.base_reactions(M, F, lid)
@@ -91,7 +91,7 @@ def test_model_page_example_uses_real_table():
     msgs = [s.value for s in at.success]
     assert any("ตรวจสมดุลเสาทุกต้นทุก load ผ่าน" in m for m in msgs)
     assert any("แรงอัดที่ฐานเสาทุกต้นรวมกันเท่ากับน้ำหนักรวม" in m for m in msgs)
-    assert at.session_state["staad_forces"].members() == list(range(1, 14))
+    assert at.session_state["staad_forces"].members() == list(range(1, 15)) + [17, 24]
 
 
 def test_column_page_example_button_and_plan_click():

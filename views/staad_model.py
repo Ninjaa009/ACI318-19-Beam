@@ -130,6 +130,13 @@ if src2 == "table":
                "แถวที่เว้น Beam / L/C ว่างไว้ แอปเติมจากแถวบนให้เอง")
     tbl = st.text_area("ตาราง Beam End Force (ทุก member)", height=180, key="sm_table",
                        placeholder="Beam\tL/C\tNode\tAxial Force kg\tShear-Y kg\t...")
+    up3 = st.file_uploader("ไฟล์ .anl (ไม่บังคับ — ใช้หา load บนคาน สำหรับออกแบบคาน และตรวจน้ำหนักรวม)",
+                           type=["anl", "txt"], key="sm_anl2")
+    if up3 is not None and st.session_state.get("anl_name") != up3.name + str(up3.size):
+        st.session_state.anl_text = anl_text = _read(up3)
+        st.session_state.anl_name = up3.name + str(up3.size)
+    if anl_text:
+        st.caption("มีไฟล์ .anl แล้ว — ใช้ตรวจน้ำหนักรวม และหา load บนคาน (MEMBER LOAD) สำหรับหน้าออกแบบคาน")
     if not tbl.strip():
         st.info("วางตารางเพื่อไปขั้นที่ 3")
         st.session_state.pop("staad_forces", None)

@@ -9,7 +9,16 @@ import datetime
 import streamlit as st
 import streamlit.components.v1 as components
 
+import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 from rcbeam import units as u
+from rcbeam.colcheck import C  # noqa: F401  (เพิ่ม skill scripts เข้า sys.path)
+from rcbeam.nav import page_link
+from rcbeam.staad_example import load_example
+from rcbeam.staad_view import model_figure, plan_figure, column_level
+import staad_io as S  # noqa: E402  (skill scripts อยู่ใน sys.path จาก rcbeam.colcheck)
 from rcbeam.flexure import (
     analyze, design_flexure, eps_ty, tension_layers, compression_layer,
     bars_per_layer,
@@ -27,6 +36,120 @@ STIRRUPS = [6, 9, 10, 12]
 st.title("ออกแบบ/ตรวจสอบคาน คสล. ตาม ACI 318M-19")
 st.caption("หน้าตัดสี่เหลี่ยม singly / doubly — แรงดัด + แรงเฉือน · อินพุต kgf–m · "
            "คำนวณภายในด้วย MPa–mm–N")
+
+# ---------------------------------------------------------------- แหล่งข้อมูล (ต้องอยู่ก่อน sidebar เพื่อเติมค่า)
+ss = st.session_state
+SM, SF = ss.get("staad_model"), ss.get("staad_forces")
+for _k, _v in (("b_b", 0.30), ("b_h", 0.60), ("b_span", 0.0), ("b_dmu", 25_000.0), ("b_dvu", 15_000.0),
+               ("b_cmu", 25_000.0), ("b_cvu", 15_000.0)):
+    ss.setdefault(_k, _v)
+mbeams = ([m for m in SM.beams() if any((m, lc) in SF.data for lc in SF.loads())]
+          if SM is not None and SF is not None else [])
+SRC = (["model"] if mbeams else []) + ["manual"]
+src = st.radio("แหล่งข้อมูล", SRC, horizontal=True, key=f"b_src_{len(SRC)}",
+               format_func=lambda x: {"model": "โมเดล STAAD (.std + .anl) — ขั้นที่ 1–2",
+                                      "manual": "ป้อน Mu / Vu เอง"}[x])
+SECT = {"left": "ปลายซ้าย (M−, เหล็กบน)", "mid": "กลางช่วง (M+, เหล็กล่าง)", "right": "ปลายขวา (M−, เหล็กบน)"}
+if src == "model":
+    # ชั้นของคาน = ระดับตีนของเสาที่หัวเสาอยู่ระดับเดียวกับคาน (ใช้กรองผัง)
+    col_top = {round(SM.joints[SM.bottom_top(c)[1]][1], 1): column_level(SM, c) for c in SM.columns()}
+    lev_of = {m: col_top.get(round(SM.joints[SM.members[m][0]][1], 1)) for m in mbeams}
+    levels = sorted({v for v in lev_of.values() if v is not None})
+    try:                                                   # คลิกคานในผัง (รอบก่อน) → เลือกคาน
+        pts = ss["b_plan"]["selection"]["points"]
+    except (KeyError, TypeError):
+        pts = []
+    cd = pts[0].get("customdata") if pts else None
+    clicked = (cd[0] if isinstance(cd, (list, tuple)) else cd) if cd is not None else None
+    if clicked in mbeams and ss.get("b_click_prev") != clicked:
+        ss.b_member = clicked
+    ss.b_click_prev = clicked
+    if ss.get("b_member") not in mbeams:
+        ss.b_member = mbeams[0]
+    if len(levels) > 1:
+        if ss.get("b_level") in levels and ss.get("b_level") != ss.get("b_level_prev") and \
+                ss.get("b_level_prev") is not None:
+            ss.b_member = next(m for m in mbeams if lev_of[m] == ss.b_level)
+        ss.b_level = lev_of[ss.b_member] if lev_of[ss.b_member] is not None else levels[0]
+        ss.b_level_prev = ss.b_level
+    c1, c2 = st.columns([1, 2])
+    lev = (c1.selectbox("ชั้น", levels, key="b_level", format_func=lambda y: f"เสาจาก Y = {y / 1000:.2f} m")
+           if len(levels) > 1 else (levels[0] if levels else None))
+    bm = c2.selectbox("คาน (member ในโมเดล) — หรือคลิกจุดกลางคานในผังข้างล่าง", mbeams, key="b_member",
+                      format_func=lambda m: f"member {m} · {SM.prism.get(m, (0, 0))[0]:.0f}×"
+                                            f"{SM.prism.get(m, (0, 0))[1]:.0f} · L {SM.length(m) / 1000:.2f} m")
+    g1, g2 = st.columns(2)
+    with g1:
+        st.plotly_chart(plan_figure(SM, bm, height=360, level=lev, pick="beam", selectable=set(mbeams)), key="b_plan", on_select="rerun",
+                        selection_mode="points", width="stretch")
+        st.caption("ผังมองจากด้านบน — **คลิกจุดกลางคานเพื่อเลือก** · สีส้ม = คานที่เลือก")
+    with g2:
+        st.plotly_chart(model_figure(SM, None, bm, member_ids=False, height=360), width="stretch")
+        st.caption("โมเดล 3D — แกน local ของคาน (y เขียว = ทิศ YD = ความลึก, z ม่วง = ทิศ ZD = ความกว้าง)")
+    if ss.get("b_member_prev") != (bm, id(SM)):
+        if bm in SM.prism:
+            ss.b_h, ss.b_b = SM.prism[bm][0] / 1000, SM.prism[bm][1] / 1000
+        ss.b_span = round(SM.length(bm) / 1000, 3)
+        ss.b_member_prev = (bm, id(SM))
+    anl_text = ss.get("anl_text")
+    ML = S.parse_anl_member_loads(anl_text) if anl_text else {}
+    strength = SM.strength_combos()
+    avail = [lc for lc in SF.loads() if (bm, lc) in SF.data]
+    c1, c2 = st.columns([2, 1])
+    use = c1.multiselect("combo ที่ใช้ออกแบบ (ตัด combo ใช้งาน/primary load ออกแล้ว)", avail,
+                         [lc for lc in avail if lc in strength], key=f"b_use_{bm}",
+                         format_func=lambda x: f"{x}: {SM.loads[x].title}" if x in SM.loads else str(x))
+    at_face = c2.checkbox("M− ที่ผิวเสา, Vu ที่ผิวเสา + d", value=True, key="b_face",
+                          help="ACI 9.4.2.1 / 9.4.3.2 — คานหล่อเป็นเนื้อเดียวกับเสา")
+    d_est = SM.prism.get(bm, (600, 300))[0] - 60.0                         # d ≈ h − 60 mm (ประมาณ)
+    R = None
+    if use:
+        try:
+            R = S.beam_design_values(SM, SF, bm, use, ML, d_eff=d_est, at_face=at_face)
+        except (ValueError, KeyError) as e:
+            st.error(str(e))
+    if R:
+        bad = [r for r in R["rows"] if r["close"] > 0.02]
+        if bad:
+            st.error(f"สมดุลคานไม่ปิด ({', '.join(str(r['load']) for r in bad)}): โมเมนต์ที่คำนวณถึงปลายคานไม่ตรงกับ "
+                     "ตาราง STAAD — load บนคาน (.anl) กับตารางแรงอาจไม่ใช่โมเดลเดียวกัน")
+        else:
+            st.success("ตรวจสมดุลคานผ่าน: แรงปลาย start + load บนคาน → ได้ M และ V ที่ปลาย end ตรงกับ STAAD ทุก combo")
+        fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                            subplot_titles=("โมเมนต์ (kN·m, บวก = ดึงล่าง)", "แรงเฉือน (kN)"))
+        for lc, D in R["diag"].items():
+            xm = [x / 1000 for x in D["x"]]
+            fig.add_trace(go.Scatter(x=xm, y=[m / 1e6 for m in D["M"]], name=f"COMB {lc}", mode="lines"), 1, 1)
+            fig.add_trace(go.Scatter(x=xm, y=[v / 1e3 for v in D["V"]], name=f"COMB {lc}", mode="lines",
+                                     showlegend=False), 2, 1)
+        for xf in (R["faces"][0], R["L"] - R["faces"][1]):
+            fig.add_vline(x=xf / 1000, line_dash="dot", line_color="#888")
+        fig.update_yaxes(autorange="reversed", row=1, col=1)          # วาดโมเมนต์บวกลงล่างแบบไดอะแกรมคาน
+        fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10), xaxis2_title="ระยะจาก start (m)")
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(pd.DataFrame([{
+            "หน้าตัด": SECT[k], "Mu (kgf·m)": u.nmm_to_kgfm(v[0]), "Vu (kgf)": u.n_to_kgf(v[1]),
+            "Mu (kN·m)": v[0] / 1e6, "Vu (kN)": v[1] / 1e3, "combo": v[2], "ที่ระยะ (m)": v[3] / 1000}
+            for k, v in R["env"].items()]), hide_index=True, width="stretch",
+            column_config={c: st.column_config.NumberColumn(format="%.2f") for c in
+                           ("Mu (kgf·m)", "Vu (kgf)", "Mu (kN·m)", "Vu (kN)", "ที่ระยะ (m)")})
+        st.caption(f"ผิวเสา: {R['faces'][0]:.0f} / {R['faces'][1]:.0f} mm จากจุดต่อ · Vu ที่ผิวเสา + d โดย d ≈ "
+                   f"h − 60 = {d_est:.0f} mm · ซ้าย = start (N{SM.members[bm][0]}), ขวา = end (N{SM.members[bm][1]})")
+        sec = st.radio("ส่งค่าไปออกแบบ/ตรวจหน้าตัด", list(SECT), horizontal=True, key="b_sec", format_func=SECT.get)
+        if ss.get("b_sec_prev") != (bm, sec, tuple(use), at_face):
+            Mu_, Vu_ = R["env"][sec][0], R["env"][sec][1]
+            ss.b_dmu = ss.b_cmu = round(u.nmm_to_kgfm(Mu_), 1)
+            ss.b_dvu = ss.b_cvu = round(u.n_to_kgf(Vu_), 1)
+            ss.b_sec_prev = (bm, sec, tuple(use), at_face)
+elif SM is None or SF is None:
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        page_link("views/staad_model.py", label="นำเข้าโมเดล STAAD ในขั้นที่ 1–2 เพื่อเลือกคานจากโมเดล", icon="🧊")
+    if c2.button("ใช้โมเดลตัวอย่าง", key="b_example"):
+        load_example(ss)
+        st.rerun()
+else:
+    st.info("ตารางแรงในขั้นที่ 2 ยังไม่มีคาน — คัดลอกตาราง Beam End Force **ทั้งตาราง (รวมคาน)** มาวาง")
 
 # ---------------------------------------------------------------- sidebar
 with st.sidebar:
@@ -48,8 +171,10 @@ with st.sidebar:
     )
 
     st.header("หน้าตัด")
-    b = u.m_to_mm(st.number_input("b (m)", 0.10, 2.00, 0.30, 0.05, format="%.2f"))
-    h = u.m_to_mm(st.number_input("h (m)", 0.15, 3.00, 0.60, 0.05, format="%.2f"))
+    b = u.m_to_mm(st.number_input("b (m) — ZD ใน STAAD", min_value=0.10, max_value=2.00, step=0.05,
+                                  format="%.2f", key="b_b"))
+    h = u.m_to_mm(st.number_input("h (m) — YD ใน STAAD", min_value=0.15, max_value=3.00, step=0.05,
+                                  format="%.2f", key="b_h"))
     cover = st.number_input("ระยะหุ้ม cover (mm)", 20.0, 100.0, 40.0, 5.0,
                             help="เลือกตามสภาพแวดล้อม Table 20.5.1.3.1")
     ds = st.selectbox("ขนาดปลอก (mm)", STIRRUPS, index=1)
@@ -64,7 +189,8 @@ with st.sidebar:
     exempt = st.checkbox("เข้าข้อยกเว้น Table 9.6.3.1", value=False)
 
     st.header("ความลึกขั้นต่ำ (ไม่บังคับ)")
-    span = u.m_to_mm(st.number_input("ช่วงคาน ℓ (m), 0 = ไม่ตรวจ", 0.0, 30.0, 0.0, 0.5))
+    span = u.m_to_mm(st.number_input("ช่วงคาน ℓ (m), 0 = ไม่ตรวจ", min_value=0.0, max_value=30.0, step=0.5,
+                                     key="b_span"))
     support = st.selectbox("สภาพรองรับ", list(SUPPORT_DIVISOR))
 
     with st.expander("ข้อมูลโครงการ (หัว Calsheet)"):
@@ -159,12 +285,10 @@ tab_design, tab_check = st.tabs(["ออกแบบ", "ตรวจสอบ"])
 
 with tab_design:
     c1, c2, c3, c4 = st.columns(4)
-    Mu = c1.number_input("Mu (kgf·m) + ดึงล่าง / − ดึงบน", value=25_000.0, step=500.0,
-                         key="d_mu")
-    Vu = c2.number_input("Vu (kgf)", value=15_000.0, step=500.0, min_value=0.0,
-                         key="d_vu")
-    db = c3.selectbox("เหล็กหลัก DB (mm)", BARS, index=3, key="d_db")
-    db_c = c4.selectbox("เหล็กอัด DB (mm)", BARS, index=2, key="d_dbc")
+    Mu = c1.number_input("Mu (kgf·m) + ดึงล่าง / − ดึงบน", step=500.0, key="b_dmu")
+    Vu = c2.number_input("Vu (kgf)", step=500.0, min_value=0.0, key="b_dvu")
+    db = c3.selectbox("เหล็กหลัก DB (mm)", BARS, index=3, key="b_ddb")
+    db_c = c4.selectbox("เหล็กอัด DB (mm)", BARS, index=2, key="b_ddbc")
     if st.button("ออกแบบ", type="primary"):
         st.session_state.design_go = True
     if st.session_state.get("design_go"):
@@ -196,15 +320,13 @@ with tab_design:
 
 with tab_check:
     c1, c2 = st.columns(2)
-    Mu_c = c1.number_input("Mu (kgf·m) + ดึงล่าง / − ดึงบน", value=25_000.0,
-                           step=500.0, key="c_mu")
-    Vu_c = c2.number_input("Vu (kgf)", value=15_000.0, step=500.0, min_value=0.0,
-                           key="c_vu")
+    Mu_c = c1.number_input("Mu (kgf·m) + ดึงล่าง / − ดึงบน", step=500.0, key="b_cmu")
+    Vu_c = c2.number_input("Vu (kgf)", step=500.0, min_value=0.0, key="b_cvu")
     c1, c2, c3, c4, c5 = st.columns(5)
     counts_txt = c1.text_input("เหล็กดึงต่อชั้น (นอก→ใน)", "3", help="เช่น 4,2")
-    db_t = c2.selectbox("DB เหล็กดึง", BARS, index=3, key="c_db")
+    db_t = c2.selectbox("DB เหล็กดึง", BARS, index=3, key="b_cdb")
     n_c = c3.number_input("จำนวนเหล็กอัด", 0, 12, 2, 1)
-    db_cc = c4.selectbox("DB เหล็กอัด", BARS, index=2, key="c_dbc")
+    db_cc = c4.selectbox("DB เหล็กอัด", BARS, index=2, key="b_cdbc")
     s = c5.number_input("ระยะปลอก s (mm), 0 = ไม่มี", 0.0, 600.0, 200.0, 25.0)
     if st.button("ตรวจสอบ", type="primary"):
         st.session_state.check_go = True

@@ -66,7 +66,7 @@ if src == "model":
                                              f"{SM.prism.get(m, (0, 0))[1]:.0f} · L {SM.length(m) / 1000:.2f} m")
     g1, g2 = st.columns(2)
     with g1:
-        st.plotly_chart(plan_figure(SM, sel, height=380, level=lev), key="c_plan", on_select="rerun",
+        st.plotly_chart(plan_figure(SM, sel, height=380, level=lev, selectable=set(mcols)), key="c_plan", on_select="rerun",
                         selection_mode="points", width="stretch")
         st.caption("ผังมองจากด้านบน — **คลิกที่เสาเพื่อเลือก** · สีส้ม = เสาที่เลือก")
     with g2:
